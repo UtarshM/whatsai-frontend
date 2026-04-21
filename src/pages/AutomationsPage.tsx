@@ -3,8 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { toast } from "@/components/ui/use-toast";
 import { useAppContext } from "@/context/AppContext";
-import type { AutomationRule } from "@/lib/api";
-import { Bot, Clock3, MessageSquareMore, Sparkles, UserPlus2, Plus } from "lucide-react";
+import { fetchAutomationFlowDefinitions, triggerAutomationReminderSweep } from "@/lib/automation/server";
+import type { AutomationFlowDefinition, AutomationRule } from "@/lib/api";
+import { Bot, Clock3, GitBranch, MessageSquareMore, Plus, Sparkles, UserPlus2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -31,10 +32,12 @@ const ruleMeta: Record<AutomationRule["type"], { icon: typeof Bot; helper: strin
 
 export default function AutomationsPage() {
   const navigate = useNavigate();
-  const { automations, automationEvents, updateAutomation, runAutomationSweep } = useAppContext();
+  const { automations, automationEvents, updateAutomation } = useAppContext();
   const [drafts, setDrafts] = useState<DraftState>({});
-  const [customFlows, setCustomFlows] = useState<any[]>([]);
+  const [customFlows, setCustomFlows] = useState<AutomationFlowDefinition[]>([]);
+  const [isLoadingFlows, setIsLoadingFlows] = useState(true);
   const [isRunningSweep, setIsRunningSweep] = useState(false);
+  const [flowSearch, setFlowSearch] = useState("");
 
   useEffect(() => {
     setDrafts(Object.fromEntries(
@@ -51,22 +54,29 @@ export default function AutomationsPage() {
   }, [automations]);
 
   useEffect(() => {
-    const fetchCustomFlows = async () => {
+    const loadFlows = async () => {
       try {
-        const baseUrl = import.meta.env.VITE_API_BASE_URL?.trim() || "http://localhost:3001";
-        const res = await fetch(`${baseUrl}/automation/definitions`);
-        if (res.ok) {
-          const data = await res.json();
-          setCustomFlows(data);
-        }
-      } catch (err) {
-        console.error(err);
+        setIsLoadingFlows(true);
+        const data = await fetchAutomationFlowDefinitions();
+        setCustomFlows(data);
+      } catch (error) {
+        console.error(error);
+        setCustomFlows([]);
+      } finally {
+        setIsLoadingFlows(false);
       }
     };
-    void fetchCustomFlows();
+
+    void loadFlows();
   }, []);
 
   const sortedEvents = useMemo(() => automationEvents.slice(0, 8), [automationEvents]);
+  const filteredFlows = useMemo(
+    () => customFlows.filter((flow) =>
+      [flow.name, flow.description ?? ""].some((value) => value.toLowerCase().includes(flowSearch.toLowerCase())),
+    ),
+    [customFlows, flowSearch],
+  );
 
   const handleSaveAutomation = async (rule: AutomationRule) => {
     const draft = drafts[rule.type];
@@ -97,7 +107,7 @@ export default function AutomationsPage() {
   const handleRunSweep = async () => {
     try {
       setIsRunningSweep(true);
-      const result = await runAutomationSweep();
+      const result = await triggerAutomationReminderSweep();
       toast({ title: result.ok ? "Reminder sweep completed" : "Reminder sweep blocked", description: result.message });
     } catch (error) {
       toast({
@@ -120,16 +130,16 @@ export default function AutomationsPage() {
               <div className="max-w-3xl">
                 <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-sm font-medium text-primary">
                   <Bot className="h-4 w-4" />
-                  Automation engine v1
+                  Automation + chatbot layer
                 </div>
-                <h1 className="mt-5 text-3xl font-display font-bold text-foreground">Automate first response, lead routing, reminders, and early follow-up</h1>
+                <h1 className="mt-5 text-3xl font-display font-bold text-foreground">Automate first response, routing, reminders, and multi-step lead journeys</h1>
                 <p className="mt-4 text-muted-foreground">
-                  This first automation layer focuses on the operational wins most WhatsApp teams need first: instant first response, owner assignment, no-reply monitoring, and structured follow-up.
+                  Phase 2 now combines rules-based automations with custom flow journeys so you can move from one-off replies to guided chatbot-style sequences.
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[420px]">
                 <Stat label="Rules" value={automations.length.toString()} />
-                <Stat label="Enabled" value={automations.filter((rule) => rule.enabled).length.toString()} />
+                <Stat label="Custom flows" value={customFlows.length.toString()} />
                 <Stat label="Recent runs" value={automationEvents.length.toString()} />
               </div>
             </div>
@@ -137,34 +147,50 @@ export default function AutomationsPage() {
         </div>
 
         <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold font-display">Custom Workflows</h2>
+          <div className="flex items-start justify-between gap-4 flex-col md:flex-row">
+            <div>
+              <h2 className="text-xl font-bold font-display">Custom workflow journeys</h2>
+              <p className="text-sm text-muted-foreground mt-1">Build chatbot-like paths with triggers, waits, conditions, tag actions, templates, and interactive replies.</p>
+            </div>
             <Button onClick={() => navigate("/automations/builder")} className="gap-2">
               <Plus className="h-4 w-4" />
               Create Custom Flow
             </Button>
           </div>
-          
+
+          <div className="rounded-[1.5rem] border border-border bg-card p-5 shadow-card">
+            <input
+              value={flowSearch}
+              onChange={(event) => setFlowSearch(event.target.value)}
+              placeholder="Search flow name or description"
+              className="h-11 w-full rounded-xl border border-input bg-background px-4 text-sm"
+            />
+          </div>
+
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {customFlows.length > 0 ? customFlows.map(flow => (
+            {isLoadingFlows ? (
+              <div className="col-span-full border border-dashed rounded-xl p-8 text-center bg-muted/5 text-muted-foreground">
+                Loading workflow definitions...
+              </div>
+            ) : filteredFlows.length > 0 ? filteredFlows.map((flow) => (
               <Card key={flow.id} className="p-5 flex flex-col justify-between hover:border-primary transition-colors cursor-pointer" onClick={() => navigate(`/automations/builder?id=${flow.id}`)}>
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <h3 className="font-bold">{flow.name}</h3>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${flow.isActive ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>
-                      {flow.isActive ? 'Active' : 'Draft'}
+                    <h3 className="font-bold text-foreground">{flow.name}</h3>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${flow.isActive ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"}`}>
+                      {flow.isActive ? "Active" : "Draft"}
                     </span>
                   </div>
-                  <p className="text-sm text-muted-foreground line-clamp-2">{flow.description || 'No description provided.'}</p>
+                  <p className="text-sm text-muted-foreground line-clamp-3">{flow.description || "No description provided."}</p>
                 </div>
                 <div className="mt-4 flex items-center gap-4 text-xs text-muted-foreground">
                   <span>{Array.isArray(flow.nodes) ? flow.nodes.length : 0} nodes</span>
-                  <span>{new Date(flow.updatedAt).toLocaleDateString()}</span>
+                  <span>{Array.isArray(flow.edges) ? flow.edges.length : 0} connections</span>
                 </div>
               </Card>
             )) : (
               <div className="col-span-full border border-dashed rounded-xl p-8 text-center bg-muted/5">
-                <p className="text-muted-foreground mb-4">You haven't created any custom workflows yet.</p>
+                <p className="text-muted-foreground mb-4">You have not created any custom workflows yet.</p>
                 <Button variant="outline" onClick={() => navigate("/automations/builder")}>Get Started</Button>
               </div>
             )}
@@ -294,6 +320,32 @@ export default function AutomationsPage() {
                 <Button onClick={() => void handleRunSweep()} disabled={isRunningSweep}>
                   {isRunningSweep ? "Running..." : "Run sweep"}
                 </Button>
+              </div>
+            </div>
+
+            <div className="rounded-[1.5rem] border border-border bg-card p-6 shadow-card">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10">
+                  <GitBranch className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h2 className="font-display text-lg font-semibold text-foreground">Flow builder coverage</h2>
+                  <p className="text-xs text-muted-foreground">What this Phase 2 builder can do now</p>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 text-sm text-muted-foreground">
+                {[
+                  "Trigger on new lead or contacted lead follow-up",
+                  "Send approved WhatsApp templates in-sequence",
+                  "Send interactive button replies for chatbot-style branching",
+                  "Wait for hours before the next step",
+                  "Check tags and branch true/false",
+                  "Apply tags to contacts as the journey progresses",
+                ].map((item) => (
+                  <div key={item} className="rounded-xl border border-border bg-muted/20 px-4 py-3">
+                    {item}
+                  </div>
+                ))}
               </div>
             </div>
 

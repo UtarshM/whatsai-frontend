@@ -25,7 +25,13 @@ export default function InboxPage() {
   const [assignmentDraft, setAssignmentDraft] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
   const [replyDraft, setReplyDraft] = useState("");
+  const [conversationSearch, setConversationSearch] = useState("");
   const [isSendingReply, setIsSendingReply] = useState(false);
+  const cannedReplies = [
+    "Hi {{contact.name}}, thanks for reaching out. Our team is reviewing this and will reply shortly.",
+    "Absolutely. I can share the latest pricing, onboarding steps, and suggested next action here.",
+    "Thanks. I have marked this conversation for follow-up and assigned it to the right owner.",
+  ];
 
   useEffect(() => {
     if (!selectedConversationId && conversations[0]?.id) {
@@ -47,9 +53,14 @@ export default function InboxPage() {
       if (showUnreadOnly && conversation.unreadCount === 0) {
         return false;
       }
+      if (conversationSearch.trim()) {
+        const query = conversationSearch.toLowerCase();
+        return [conversation.displayName, conversation.phone, conversation.lastMessagePreview, conversation.assignedTo || ""]
+          .some((value) => value.toLowerCase().includes(query));
+      }
       return true;
     })
-  ), [conversations, ownerFilter, showUnreadOnly, statusFilter, user?.name]);
+  ), [conversationSearch, conversations, ownerFilter, showUnreadOnly, statusFilter, user?.name]);
 
   const activeConversation = filteredConversations.find((conversation) => conversation.id === selectedConversationId)
     ?? conversations.find((conversation) => conversation.id === selectedConversationId)
@@ -182,11 +193,18 @@ export default function InboxPage() {
         <div className="grid gap-6 lg:grid-cols-[0.85fr,1.15fr]">
           <section className="rounded-[1.5rem] border border-border bg-card shadow-card overflow-hidden">
             <div className="border-b border-border px-6 py-5">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <h2 className="font-display text-lg font-semibold text-foreground">Conversations</h2>
-                <div className="flex flex-wrap gap-2">
-                  <select
-                    value={statusFilter}
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <h2 className="font-display text-lg font-semibold text-foreground">Conversations</h2>
+                  <div className="flex flex-wrap gap-2">
+                    <input
+                      type="text"
+                      value={conversationSearch}
+                      onChange={(event) => setConversationSearch(event.target.value)}
+                      placeholder="Search threads"
+                      className="h-10 rounded-xl border border-input bg-background px-4 text-sm text-foreground"
+                    />
+                    <select
+                      value={statusFilter}
                     onChange={(event) => setStatusFilter(event.target.value as "All" | "Open" | "Pending" | "Resolved")}
                     className="h-10 rounded-xl border border-input bg-background px-4 text-sm text-foreground"
                   >
@@ -284,6 +302,18 @@ export default function InboxPage() {
                         />
                       </div>
                       <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            setAssignmentDraft(user?.name ?? "");
+                            void handleConversationUpdate(
+                              { id: activeConversation.id, assignedTo: user?.name ?? null },
+                              user?.name ? `Conversation assigned to ${user.name}.` : "Conversation is now unassigned.",
+                            );
+                          }}
+                        >
+                          Assign to me
+                        </Button>
                         <Button
                           variant="outline"
                           onClick={() => void handleConversationUpdate(
@@ -398,6 +428,18 @@ export default function InboxPage() {
                   </div>
                   <div className="rounded-[1.25rem] border border-border bg-muted/20 p-4">
                     <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Reply from inbox</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {cannedReplies.map((reply) => (
+                        <button
+                          key={reply}
+                          type="button"
+                          onClick={() => setReplyDraft(reply.replace("{{contact.name}}", activeConversation.displayName))}
+                          className="rounded-full border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
+                        >
+                          Use canned reply
+                        </button>
+                      ))}
+                    </div>
                     <textarea
                       value={replyDraft}
                       onChange={(event) => setReplyDraft(event.target.value)}

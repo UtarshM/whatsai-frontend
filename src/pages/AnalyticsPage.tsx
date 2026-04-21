@@ -1,6 +1,9 @@
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useAppContext } from "@/context/AppContext";
 import { BarChart3, Clock3, IndianRupee, MessageSquare, Target, TrendingUp } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { fetchMetaSourceMappings, type MetaLeadSourceMapping } from "@/lib/meta/sourceMappings";
+import { matchLeadToMetaMapping, summarizeMappedLeadStatuses } from "@/lib/meta/attribution";
 
 export default function AnalyticsPage() {
   const {
@@ -11,6 +14,13 @@ export default function AnalyticsPage() {
     totalSpent,
     walletBalance,
   } = useAppContext();
+  const [mappings, setMappings] = useState<MetaLeadSourceMapping[]>([]);
+
+  useEffect(() => {
+    void fetchMetaSourceMappings()
+      .then(setMappings)
+      .catch(() => setMappings([]));
+  }, []);
 
   const outboundMessages = conversationMessages.filter((message) => message.direction === "Outbound");
   const inboundMessages = conversationMessages.filter((message) => message.direction === "Inbound");
@@ -101,6 +111,19 @@ export default function AnalyticsPage() {
     },
   ];
 
+  const metaAdLeads = leads.filter((lead) => lead.source === "Meta Ads");
+  const mappedMetaAdLeads = metaAdLeads.filter((lead) => matchLeadToMetaMapping(lead, mappings).mapping);
+  const unmappedMetaAdLeads = metaAdLeads.filter((lead) => !matchLeadToMetaMapping(lead, mappings).mapping);
+  const mappingPerformanceRows = useMemo(() => (
+    mappings.map((mapping) => {
+      const mappingLeads = metaAdLeads.filter((lead) => matchLeadToMetaMapping(lead, [mapping]).mapping);
+      return {
+        mapping,
+        ...summarizeMappedLeadStatuses(mappingLeads),
+      };
+    }).filter((row) => row.total > 0)
+  ), [mappings, metaAdLeads]);
+
   return (
     <DashboardLayout>
       <div className="mx-auto max-w-7xl space-y-8">
@@ -133,6 +156,12 @@ export default function AnalyticsPage() {
           <MetricCard icon={Target} title="Campaign delivery" value={`${campaignDeliveryRate}%`} subtitle={`${deliveredCampaigns} of ${totalCampaigns} campaigns delivered`} />
           <MetricCard icon={Clock3} title="Avg response time" value={averageResponseMinutes ? `${averageResponseMinutes} min` : "-"} subtitle="Inbound to first outbound reply" />
           <MetricCard icon={IndianRupee} title="Cost per lead" value={leads.length > 0 ? `Rs ${costPerLead}` : "-"} subtitle="Total spend divided by all leads" />
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-3">
+          <AnalyticsBlock label="Meta ad leads" value={metaAdLeads.length.toString()} meta="All CTWA / lead-ad sourced leads" />
+          <AnalyticsBlock label="Mapped CTWA leads" value={mappedMetaAdLeads.length.toString()} meta="Matched to a saved page/ad/form mapping" />
+          <AnalyticsBlock label="Unmapped CTWA leads" value={unmappedMetaAdLeads.length.toString()} meta="Need a source mapping for cleaner attribution" />
         </div>
 
         <div className="grid gap-6 xl:grid-cols-[1.05fr,0.95fr]">
@@ -200,6 +229,29 @@ export default function AnalyticsPage() {
             </div>
           </section>
         </div>
+
+        <section className="rounded-[1.5rem] border border-border bg-card shadow-card overflow-hidden">
+          <div className="border-b border-border px-6 py-5">
+            <h2 className="font-display text-lg font-semibold text-foreground">CTWA mapping performance</h2>
+          </div>
+          <div className="divide-y divide-border">
+            {mappingPerformanceRows.length > 0 ? mappingPerformanceRows.map((row) => (
+              <div key={row.mapping.id} className="grid gap-4 px-6 py-5 md:grid-cols-[1.2fr,0.9fr,0.9fr,0.9fr] md:items-center">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">{row.mapping.label}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Page: {row.mapping.page_id || "-"} | Ad: {row.mapping.ad_id || "-"} | Form: {row.mapping.form_id || "-"}
+                  </p>
+                </div>
+                <SourceStat label="Leads" value={row.total.toString()} />
+                <SourceStat label="Qualified" value={row.qualified.toString()} />
+                <SourceStat label="Won" value={row.won.toString()} />
+              </div>
+            )) : (
+              <EmptyBlock title="No mapped CTWA data yet" body="Save source mappings in Settings to start seeing campaign-level attribution performance here." />
+            )}
+          </div>
+        </section>
       </div>
     </DashboardLayout>
   );

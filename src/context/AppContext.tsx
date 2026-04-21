@@ -10,9 +10,11 @@ import {
   type Campaign,
   type ConnectWhatsAppInput,
   type CreateCampaignInput,
+  type CreateTemplateInput,
   type PartnerApplyInput,
   type RetryFailedSendInput,
   type Template,
+  type UpdateTemplateInput,
   type UpdateAutomationInput,
   type UpdateConversationInput,
   type UpdateLeadInput,
@@ -45,12 +47,18 @@ interface AppContextValue extends AppState {
   runAutomationSweep: () => Promise<ActionResult>;
   retryFailedSend: (input: RetryFailedSendInput) => Promise<ActionResult>;
   createCampaign: (input: CreateCampaignInput) => Promise<ActionResult>;
+  createTemplate: (input: CreateTemplateInput) => Promise<void>;
+  updateTemplate: (input: UpdateTemplateInput) => Promise<void>;
   refreshAppState: () => Promise<void>;
   applyAsPartner: (input: PartnerApplyInput) => Promise<ActionResult>;
   approvePartner: (partnerId: string) => Promise<ActionResult>;
   rejectPartner: (partnerId: string) => Promise<ActionResult>;
   requestPayout: (amount: number, paymentMethod: string, paymentDetails: Record<string, unknown>) => Promise<ActionResult>;
   updatePartnerCommission: (partnerId: string, commissionRate: number) => Promise<ActionResult>;
+  getUsers: () => Promise<User[]>;
+  updateUserRole: (userId: string, role: UserRole) => Promise<User>;
+  deleteUser: (userId: string) => Promise<void>;
+  updateBranding: (branding: Branding) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
@@ -179,6 +187,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setState(nextState);
       return result;
     },
+    createTemplate: async (input: CreateTemplateInput) => {
+      const nextState = await api.createTemplate(input);
+      setState(nextState);
+    },
+    updateTemplate: async (input: UpdateTemplateInput) => {
+      const nextState = await api.updateTemplate(input);
+      setState(nextState);
+    },
     refreshAppState: async () => {
       const nextState = await api.getAppState();
       setState(nextState);
@@ -222,6 +238,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setState(nextState);
       }
       return result;
+    },
+    getUsers: async () => {
+      return api.getUsers();
+    },
+    updateUserRole: async (userId: string, role: any) => {
+      const updatedUser = await api.updateUserRole(userId, role);
+      await api.getAppState().then(setState);
+      return updatedUser;
+    },
+    deleteUser: async (userId: string) => {
+      await api.deleteUser(userId);
+      await api.getAppState().then(setState);
+    },
+    updateBranding: async (branding: any) => {
+      const token = await supabase?.auth.getSession().then(s => s.data.session?.access_token) || "";
+      await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:3001"}/partners/branding`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(branding)
+      });
+      // Update local state to reflect immediately
+      setState(prev => ({ ...prev, branding }));
     },
   }), [isHydrating, state]);
 

@@ -11,7 +11,9 @@ import {
   type AppState,
   type ConnectWhatsAppInput,
   type CreateCampaignInput,
+  type CreateTemplateInput,
   type RetryFailedSendInput,
+  type UpdateTemplateInput,
   type UpdateAutomationInput,
   type UpdateConversationInput,
   type UpdateLeadInput,
@@ -603,11 +605,11 @@ export const supabaseApi: AppApi = {
     const { workspaceId } = await currentWorkspaceIdOrThrow();
     const { data: contact, error } = await client
       .from("contacts")
-      .insert({
+      .upsert({
         workspace_id: workspaceId,
         name: input.name,
         phone: input.phone,
-      })
+      }, { onConflict: "workspace_id,phone" })
       .select("id")
       .single();
     if (error) {
@@ -842,10 +844,11 @@ export const supabaseApi: AppApi = {
         workspace_id: workspaceId,
         template_id: input.templateId,
         name: input.name,
-        status: input.sendNow ? "sending" : "draft",
+        status: input.sendNow ? "sending" : input.scheduledFor ? "scheduled" : "draft",
         estimated_cost: estimatedCost,
         spent: input.sendNow ? estimatedCost : 0,
         launched_at: input.sendNow ? new Date().toISOString() : null,
+        scheduled_for: input.sendNow ? null : input.scheduledFor ?? null,
       })
       .select("id")
       .single();
@@ -885,9 +888,54 @@ export const supabaseApi: AppApi = {
       state: await buildSupabaseAppState(),
       result: {
         ok: true,
-        message: input.sendNow ? "Campaign launched successfully." : "Draft saved successfully.",
+        message: input.sendNow
+          ? "Campaign launched successfully."
+          : input.scheduledFor
+            ? "Campaign scheduled successfully."
+            : "Draft saved successfully.",
       },
     };
+  },
+
+  async createTemplate(input: CreateTemplateInput) {
+    const client = requireSupabase();
+    const { workspaceId } = await currentWorkspaceIdOrThrow();
+    const { error } = await client.from("message_templates").insert({
+      workspace_id: workspaceId,
+      name: input.name,
+      category: input.category.toLowerCase(),
+      status: "pending",
+      language: input.language,
+      body: input.preview,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return buildSupabaseAppState();
+  },
+
+  async updateTemplate(input: UpdateTemplateInput) {
+    const client = requireSupabase();
+    const { workspaceId } = await currentWorkspaceIdOrThrow();
+    const { error } = await client
+      .from("message_templates")
+      .update({
+        name: input.name,
+        category: input.category.toLowerCase(),
+        status: input.status.toLowerCase(),
+        language: input.language,
+        body: input.preview,
+      })
+      .eq("workspace_id", workspaceId)
+      .eq("id", input.id);
+
+    if (error) {
+      throw error;
+    }
+
+    return buildSupabaseAppState();
   },
 
   async getPartners() {

@@ -7,18 +7,24 @@ import {
   type AppState,
   type ConnectWhatsAppInput,
   type CreateCampaignInput,
+  type CreateTemplateInput,
   type AddConversationNoteInput,
   type RetryFailedSendInput,
+  type UpdateTemplateInput,
   type UpdateAutomationInput,
   type UpdateConversationInput,
   type UpdateLeadInput,
   type Partner,
   type PartnerApplyInput,
+  type PartnerPublicApplyInput,
   type PartnerDashboardStats,
   type PartnerPayout,
   type PartnerReferral,
   type PartnerStatus,
   type PayoutStatus,
+  type User,
+  type UserRole,
+  type Branding,
 } from "@/lib/api/types";
 
 function cloneState(state: AppState): AppState {
@@ -237,6 +243,27 @@ export const mockApi = {
 
   async addContact(input: AddContactInput) {
     const state = readAppState();
+    const normalizedPhone = input.phone.replace(/\s+/g, "");
+    const existingContact = state.contacts.find((contact) => contact.phone.replace(/\s+/g, "") === normalizedPhone);
+    if (existingContact) {
+      const mergedTags = Array.from(new Set([...existingContact.tags, ...input.tags]));
+      const nextState: AppState = {
+        ...state,
+        contacts: state.contacts.map((contact) => (
+          contact.id === existingContact.id
+            ? { ...contact, name: input.name || contact.name, phone: input.phone, tags: mergedTags }
+            : contact
+        )),
+        recentActivity: pushActivity(
+          state,
+          "Contact updated",
+          `${input.name} already existed, so the audience record was refreshed`,
+        ),
+      };
+      writeAppState(nextState);
+      return nextState;
+    }
+
     const nextState: AppState = {
       ...state,
       contacts: [{ id: crypto.randomUUID(), ...input }, ...state.contacts],
@@ -447,6 +474,8 @@ export const mockApi = {
 
     const selectedTemplate = state.templates.find((template) => template.id === input.templateId);
     const nextBalance = input.sendNow ? state.walletBalance - estimatedCost : state.walletBalance;
+    const nextStatus = input.sendNow ? "Sending" : input.scheduledFor ? "Scheduled" : "Draft";
+    const nextDate = input.scheduledFor || new Date().toISOString();
     const nextState: AppState = {
       ...state,
       campaigns: [
@@ -455,8 +484,8 @@ export const mockApi = {
           name: input.name,
           templateId: input.templateId,
           contactIds: input.contactIds,
-          status: input.sendNow ? "Sending" : "Draft",
-          date: new Date().toISOString(),
+          status: nextStatus,
+          date: nextDate,
           estimatedCost,
           spent: input.sendNow ? estimatedCost : 0,
         },
@@ -480,7 +509,7 @@ export const mockApi = {
         : state.transactions,
       recentActivity: pushActivity(
         state,
-        input.sendNow ? "Campaign launched" : "Campaign drafted",
+        input.sendNow ? "Campaign launched" : input.scheduledFor ? "Campaign scheduled" : "Campaign drafted",
         `${input.name} using ${selectedTemplate?.name ?? "selected template"}`,
       ),
     };
@@ -490,9 +519,52 @@ export const mockApi = {
       state: nextState,
       result: {
         ok: true,
-        message: input.sendNow ? "Campaign launched successfully." : "Draft saved successfully.",
+        message: input.sendNow
+          ? "Campaign launched successfully."
+          : input.scheduledFor
+            ? "Campaign scheduled successfully."
+            : "Draft saved successfully.",
       },
     };
+  },
+
+  async createTemplate(input: CreateTemplateInput) {
+    const state = readAppState();
+    const nextState: AppState = {
+      ...state,
+      templates: [
+        {
+          id: crypto.randomUUID(),
+          ...input,
+          status: "Pending",
+        },
+        ...state.templates,
+      ],
+      recentActivity: pushActivity(
+        state,
+        "Template created",
+        `${input.name} has been added to the template library`,
+      ),
+    };
+    writeAppState(nextState);
+    return nextState;
+  },
+
+  async updateTemplate(input: UpdateTemplateInput) {
+    const state = readAppState();
+    const nextState: AppState = {
+      ...state,
+      templates: state.templates.map((template) => (
+        template.id === input.id ? { ...input } : template
+      )),
+      recentActivity: pushActivity(
+        state,
+        "Template updated",
+        `${input.name} is now ${input.status.toLowerCase()}`,
+      ),
+    };
+    writeAppState(nextState);
+    return nextState;
   },
 
   async getPartners() {
@@ -573,6 +645,11 @@ export const mockApi = {
 
     writePartners([newPartner, ...partners]);
     return { ok: true, message: "Partner application submitted successfully." };
+  },
+
+  async applyAsPublicPartner(input: PartnerPublicApplyInput): Promise<ActionResult> {
+    // In mock API, it's essentially the same as applyAsPartner.
+    return this.applyAsPartner(input);
   },
 
   async approvePartner(partnerId: string): Promise<ActionResult> {
@@ -754,14 +831,22 @@ export interface AppApi {
   runAutomationSweep: () => Promise<{ state: AppState; result: ActionResult }>;
   retryFailedSend: (input: RetryFailedSendInput) => Promise<{ state: AppState; result: ActionResult }>;
   createCampaign: (input: CreateCampaignInput) => Promise<{ state: AppState; result: ActionResult }>;
+  createTemplate: (input: CreateTemplateInput) => Promise<AppState>;
+  updateTemplate: (input: UpdateTemplateInput) => Promise<AppState>;
   // Partner system
   getPartners: () => Promise<Partner[]>;
   getPartnerDashboard: () => Promise<{ partner: Partner; stats: PartnerDashboardStats; referrals: PartnerReferral[]; payouts: PartnerPayout[] }>;
   applyAsPartner: (input: PartnerApplyInput) => Promise<ActionResult>;
+  applyAsPublicPartner: (input: PartnerPublicApplyInput) => Promise<ActionResult>;
   approvePartner: (partnerId: string) => Promise<ActionResult>;
   rejectPartner: (partnerId: string) => Promise<ActionResult>;
   getPartnerReferrals: (partnerId?: string) => Promise<PartnerReferral[]>;
   getPartnerPayouts: (partnerId?: string) => Promise<PartnerPayout[]>;
   requestPayout: (amount: number, paymentMethod: string, paymentDetails: Record<string, unknown>) => Promise<ActionResult>;
   updatePartnerCommission: (partnerId: string, commissionRate: number) => Promise<ActionResult>;
+  // Admin & Branding
+  getUsers: () => Promise<User[]>;
+  updateUserRole: (userId: string, role: UserRole) => Promise<User>;
+  deleteUser: (userId: string) => Promise<void>;
+  getBranding: (ref: string) => Promise<Branding | null>;
 }

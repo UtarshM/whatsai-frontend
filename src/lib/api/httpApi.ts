@@ -16,15 +16,21 @@ import type {
   AppState,
   ConnectWhatsAppInput,
   CreateCampaignInput,
+  CreateTemplateInput,
   Partner,
   PartnerApplyInput,
+  PartnerPublicApplyInput,
   PartnerDashboardStats,
   PartnerPayout,
   PartnerReferral,
   RetryFailedSendInput,
+  UpdateTemplateInput,
   UpdateAutomationInput,
   UpdateConversationInput,
   UpdateLeadInput,
+  User,
+  UserRole,
+  Branding,
 } from "@/lib/api/types";
 import type { AppApi } from "@/lib/api/mockApi";
 
@@ -136,6 +142,16 @@ export function createHttpApi({ baseUrl }: HttpApiOptions): AppApi {
         method: "POST",
         body: JSON.stringify(input satisfies CreateCampaignRequest),
       }),
+    createTemplate: (input: CreateTemplateInput) =>
+      getState("/templates", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    updateTemplate: (input: UpdateTemplateInput) =>
+      getState(`/templates/${input.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      }),
     updateConversation: (input: UpdateConversationInput) =>
       getState("/conversations/update", {
         method: "POST",
@@ -179,6 +195,11 @@ export function createHttpApi({ baseUrl }: HttpApiOptions): AppApi {
         method: "POST",
         body: JSON.stringify(input),
       }),
+    applyAsPublicPartner: (input: PartnerPublicApplyInput) =>
+      request<ActionResult>(apiRoutes.partnerPublicApply, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
     approvePartner: (partnerId: string) =>
       request<ActionResult>(apiRoutes.partnerApprove.replace(":id", partnerId), {
         method: "POST",
@@ -204,6 +225,23 @@ export function createHttpApi({ baseUrl }: HttpApiOptions): AppApi {
       request<ActionResult>(apiRoutes.partnerCommission.replace(":id", partnerId), {
         method: "PATCH",
         body: JSON.stringify({ commissionRate }),
+      }),
+    getUsers: () =>
+      request<User[]>("/admin/users", {
+        method: "GET"
+      }),
+    updateUserRole: (userId: string, role: UserRole) =>
+      request<User>(`/admin/users/${userId}/role`, {
+        method: "PATCH",
+        body: JSON.stringify({ role })
+      }),
+    deleteUser: (userId: string) =>
+      request<void>(`/admin/users/${userId}`, {
+        method: "DELETE"
+      }),
+    getBranding: (ref: string) =>
+      request<Branding | null>(`/branding/${ref}`, {
+        method: "GET"
       }),
   };
 }

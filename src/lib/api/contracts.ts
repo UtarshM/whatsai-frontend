@@ -23,6 +23,7 @@ export const apiRoutes = {
   partners: "/partners",
   partnerDashboard: "/partners/dashboard",
   partnerApply: "/partners/apply",
+  partnerPublicApply: "/partners/public-apply",
   partnerApprove: "/partners/:id/approve",
   partnerReject: "/partners/:id/reject",
   partnerCommission: "/partners/:id/commission",

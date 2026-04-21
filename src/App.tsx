@@ -28,6 +28,8 @@ import SettingsPage from "./pages/SettingsPage";
 import PartnerPage from "./pages/PartnerPage";
 import PartnerDashboard from "./pages/PartnerDashboard";
 import PartnerManagement from "./pages/PartnerManagement";
+import PartnerBranding from "./pages/PartnerBranding";
+import AdminUserManagement from "./pages/AdminUserManagement";
 
 const queryClient = new QueryClient();
 
@@ -61,6 +63,8 @@ const App = () => (
               <Route path="/reliability" element={<ReliabilityPage />} />
               <Route path="/partners/dashboard" element={<PartnerDashboard />} />
               <Route path="/partners/manage" element={<PartnerManagement />} />
+              <Route path="/partners/branding" element={<PartnerBranding />} />
+              <Route path="/admin/users" element={<AdminUserManagement />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
             <Route path="*" element={<NotFound />} />

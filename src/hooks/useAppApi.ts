@@ -5,6 +5,7 @@ import type {
   ConnectWhatsAppInput,
   CreateCampaignInput,
   PartnerApplyInput,
+  PartnerPublicApplyInput,
 } from "@/lib/api";
 
 export const appStateQueryKey = ["app-state"] as const;
@@ -104,6 +105,17 @@ export function useApplyAsPartnerMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: PartnerApplyInput) => api.applyAsPartner(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["partners-list"] });
+      queryClient.invalidateQueries({ queryKey: ["partner-dashboard"] });
+    },
+  });
+}
+
+export function useApplyAsPublicPartnerMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: PartnerPublicApplyInput) => api.applyAsPublicPartner(input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["partners-list"] });
       queryClient.invalidateQueries({ queryKey: ["partner-dashboard"] });

@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { useMemo, useState } from "react";
 import { useAppContext } from "@/context/AppContext";
 import { toast } from "@/components/ui/use-toast";
+import type { Contact } from "@/lib/api";
 
 const tagColors: Record<string, string> = {
   VIP: "bg-primary/10 text-primary",
@@ -19,23 +20,53 @@ const tagColors: Record<string, string> = {
 export default function ContactsPage() {
   const { contacts, addContact, uploadSampleContacts } = useAppContext();
   const [search, setSearch] = useState("");
+  const [activeTag, setActiveTag] = useState<string>("All");
   const [showForm, setShowForm] = useState(false);
+  const [showBulkImport, setShowBulkImport] = useState(false);
+  const [editingContactId, setEditingContactId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [tags, setTags] = useState("");
+  const [bulkRows, setBulkRows] = useState("");
+
+  const availableTags = useMemo(
+    () => ["All", ...Array.from(new Set(contacts.flatMap((contact) => contact.tags))).sort()],
+    [contacts],
+  );
 
   const filtered = useMemo(
     () =>
-      contacts.filter(
-        (contact) =>
+      contacts.filter((contact) => {
+        const matchesSearch =
           contact.name.toLowerCase().includes(search.toLowerCase()) ||
           contact.phone.includes(search) ||
-          contact.tags.some((tag) => tag.toLowerCase().includes(search.toLowerCase())),
-      ),
-    [contacts, search],
+          contact.tags.some((tag) => tag.toLowerCase().includes(search.toLowerCase()));
+        const matchesTag = activeTag === "All" || contact.tags.includes(activeTag);
+        return matchesSearch && matchesTag;
+      }),
+    [activeTag, contacts, search],
   );
 
-  const handleAddContact = async () => {
+  const segmentSummary = useMemo(() => {
+    return availableTags
+      .filter((tag) => tag !== "All")
+      .map((tag) => ({
+        tag,
+        count: contacts.filter((contact) => contact.tags.includes(tag)).length,
+      }))
+      .sort((left, right) => right.count - left.count)
+      .slice(0, 4);
+  }, [availableTags, contacts]);
+
+  const resetForm = () => {
+    setName("");
+    setPhone("");
+    setTags("");
+    setEditingContactId(null);
+    setShowForm(false);
+  };
+
+  const handleSaveContact = async () => {
     if (!name.trim() || !phone.trim()) {
       toast({ title: "Missing details", description: "Add both a name and phone number." });
       return;
@@ -49,11 +80,53 @@ export default function ContactsPage() {
         .map((tag) => tag.trim())
         .filter(Boolean),
     });
-    toast({ title: "Contact added", description: `${name.trim()} is ready for your next campaign.` });
-    setName("");
-    setPhone("");
-    setTags("");
-    setShowForm(false);
+
+    toast({
+      title: editingContactId ? "Contact updated" : "Contact added",
+      description: `${name.trim()} is ready for your CRM and campaign workflows.`,
+    });
+    resetForm();
+  };
+
+  const handleBulkImport = async () => {
+    const rows = bulkRows
+      .split("\n")
+      .map((row) => row.trim())
+      .filter(Boolean);
+
+    if (rows.length === 0) {
+      toast({ title: "No rows found", description: "Paste at least one CSV row in the format name, phone, tags." });
+      return;
+    }
+
+    let imported = 0;
+    for (const row of rows) {
+      const [rawName, rawPhone, ...rawTags] = row.split(",").map((value) => value.trim());
+      if (!rawName || !rawPhone) {
+        continue;
+      }
+      await addContact({
+        name: rawName,
+        phone: rawPhone,
+        tags: rawTags.join(",").split("|").map((tag) => tag.trim()).filter(Boolean),
+      });
+      imported += 1;
+    }
+
+    toast({
+      title: "Audience import complete",
+      description: `${imported} contact${imported === 1 ? "" : "s"} were added or refreshed from the pasted CSV rows.`,
+    });
+    setBulkRows("");
+    setShowBulkImport(false);
+  };
+
+  const startEditing = (contact: Contact) => {
+    setEditingContactId(contact.id);
+    setName(contact.name);
+    setPhone(contact.phone);
+    setTags(contact.tags.join(", "));
+    setShowForm(true);
   };
 
   return (
@@ -72,54 +145,95 @@ export default function ContactsPage() {
                   <Users className="h-4 w-4" />
                   Audience operating layer
                 </div>
-                <h1 className="mt-5 text-3xl font-display font-bold text-foreground">Build cleaner WhatsApp audience lists for repeatable campaign execution</h1>
+                <h1 className="mt-5 text-3xl font-display font-bold text-foreground">Build cleaner WhatsApp audiences and reusable CRM segments</h1>
                 <p className="mt-4 text-muted-foreground">
-                  Contacts are now framed as a reusable operating asset: tagged audience segments, CSV imports, and list hygiene that make campaign launches faster and safer.
+                  Contacts now behave more like a real CRM surface: searchable lists, segment filters, and editable records that roll straight into campaigns.
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[420px]">
-                <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur">
-                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Total contacts</p>
-                  <p className="mt-2 text-sm font-semibold text-foreground">{contacts.length}</p>
-                </div>
-                <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur">
-                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Tagged segments</p>
-                  <p className="mt-2 text-sm font-semibold text-foreground">{new Set(contacts.flatMap((contact) => contact.tags)).size}</p>
-                </div>
-                <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur">
-                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">CSV ready</p>
-                  <p className="mt-2 text-sm font-semibold text-foreground">Import + enrich</p>
-                </div>
+                <Metric label="Total contacts" value={contacts.length.toString()} />
+                <Metric label="Tagged segments" value={(availableTags.length - 1).toString()} />
+                <Metric label="Visible now" value={filtered.length.toString()} />
               </div>
             </div>
           </div>
         </motion.div>
 
-        <div className="flex items-start justify-between gap-4 flex-col md:flex-row">
-          <div>
-            <h2 className="text-2xl font-display font-bold text-foreground">Contact workspace</h2>
-            <p className="text-muted-foreground mt-1">{contacts.length} contacts available for targeting</p>
-          </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={async () => {
-                await uploadSampleContacts();
-                toast({ title: "CSV uploaded", description: "Sample contacts imported successfully." });
-              }}
-            >
-              <Upload className="h-4 w-4 mr-1" /> Upload CSV
-            </Button>
-            <Button variant="gradient" size="sm" onClick={() => setShowForm((value) => !value)}>
-              <Plus className="h-4 w-4 mr-1" /> Add Contact
-            </Button>
-          </div>
+        <div className="grid gap-4 lg:grid-cols-[1.1fr,0.9fr]">
+          <section className="rounded-[1.5rem] border border-border bg-card p-5 shadow-card">
+            <div className="flex items-start justify-between gap-4 flex-col md:flex-row">
+              <div>
+                <h2 className="text-2xl font-display font-bold text-foreground">Contact workspace</h2>
+                <p className="text-muted-foreground mt-1">{contacts.length} contacts available for targeting</p>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    await uploadSampleContacts();
+                    toast({ title: "CSV uploaded", description: "Sample contacts imported successfully." });
+                  }}
+                >
+                  <Upload className="h-4 w-4 mr-1" /> Upload CSV
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setShowBulkImport((value) => !value)}>
+                  <Upload className="h-4 w-4 mr-1" /> Paste CSV
+                </Button>
+                <Button
+                  variant="gradient"
+                  size="sm"
+                  onClick={() => {
+                    setEditingContactId(null);
+                    setShowForm((value) => !value);
+                    if (showForm) {
+                      resetForm();
+                    }
+                  }}
+                >
+                  <Plus className="h-4 w-4 mr-1" /> Add Contact
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-2">
+              {availableTags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => setActiveTag(tag)}
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                    activeTag === tag ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-[1.5rem] border border-border bg-card p-5 shadow-card">
+            <h3 className="font-display text-lg font-semibold text-foreground">Top segments</h3>
+            <div className="mt-4 grid gap-3">
+              {segmentSummary.length > 0 ? segmentSummary.map((item) => (
+                <div key={item.tag} className="rounded-xl border border-border bg-muted/20 p-4">
+                  <p className="text-sm font-medium text-foreground">{item.tag}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{item.count} contact{item.count === 1 ? "" : "s"} in this segment</p>
+                </div>
+              )) : (
+                <div className="rounded-xl border border-dashed border-border bg-muted/10 p-4 text-sm text-muted-foreground">
+                  Tags will appear here as contacts are enriched.
+                </div>
+              )}
+            </div>
+          </section>
         </div>
 
         {showForm && (
           <div className="rounded-[1.5rem] border border-border bg-card p-5 shadow-card">
-            <h3 className="font-display text-lg font-semibold text-foreground">Add a new audience record</h3>
+            <h3 className="font-display text-lg font-semibold text-foreground">
+              {editingContactId ? "Edit audience record" : "Add a new audience record"}
+            </h3>
             <div className="mt-4 grid gap-3 md:grid-cols-3">
               <input
                 type="text"
@@ -143,8 +257,28 @@ export default function ContactsPage() {
                 className="h-11 rounded-xl border border-input bg-background px-4 text-sm"
               />
             </div>
-            <div className="mt-4 flex justify-end">
-              <Button onClick={handleAddContact}>Save Contact</Button>
+            <p className="mt-3 text-xs text-muted-foreground">Editing uses the existing contact save path, so keeping the phone number stable will update the current record cleanly.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="outline" onClick={resetForm}>Cancel</Button>
+              <Button onClick={() => void handleSaveContact()}>{editingContactId ? "Update Contact" : "Save Contact"}</Button>
+            </div>
+          </div>
+        )}
+
+        {showBulkImport && (
+          <div className="rounded-[1.5rem] border border-border bg-card p-5 shadow-card">
+            <h3 className="font-display text-lg font-semibold text-foreground">Paste contacts in CSV format</h3>
+            <p className="mt-1 text-sm text-muted-foreground">Use one row per contact: <span className="font-mono">name, phone, tag1|tag2</span></p>
+            <textarea
+              rows={6}
+              value={bulkRows}
+              onChange={(event) => setBulkRows(event.target.value)}
+              placeholder={"Rahul Sharma, +91 98765 43210, VIP|Shopify\nSneha Gupta, +91 65432 10987, D2C|Demo"}
+              className="mt-4 w-full rounded-xl border border-input bg-background px-4 py-3 text-sm text-foreground"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowBulkImport(false)}>Cancel</Button>
+              <Button onClick={() => void handleBulkImport()}>Import Rows</Button>
             </div>
           </div>
         )}
@@ -201,10 +335,10 @@ export default function ContactsPage() {
                     </td>
                     <td className="px-6 py-5 text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toast({ title: "Edit flow", description: "Inline editing can be added next." })}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => startEditing(contact)}>
                           <Edit2 className="h-3.5 w-3.5" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => toast({ title: "Delete not enabled", description: "This MVP keeps sample contacts persistent for now." })}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => toast({ title: "Delete not enabled", description: "We have editing and segmentation in place; delete can be added next without losing current state safety." })}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
@@ -217,5 +351,14 @@ export default function ContactsPage() {
         </motion.div>
       </div>
     </DashboardLayout>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur">
+      <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
+      <p className="mt-2 text-sm font-semibold text-foreground">{value}</p>
+    </div>
   );
 }

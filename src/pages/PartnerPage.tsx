@@ -45,7 +45,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { useApplyAsPartnerMutation } from "@/hooks/useAppApi";
+import { useApplyAsPublicPartnerMutation } from "@/hooks/useAppApi";
 import type { PartnerType } from "@/lib/api/types";
 
 const partnerStats = [
@@ -161,16 +161,18 @@ export default function PartnerPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [contactName, setContactName] = useState("");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [partnerType, setPartnerType] = useState<PartnerType>("affiliate");
   const [message, setMessage] = useState("");
   const { toast } = useToast();
-  const applyMutation = useApplyAsPartnerMutation();
+  const applyMutation = useApplyAsPublicPartnerMutation();
 
   const resetForm = () => {
     setContactName("");
     setEmail("");
+    setPassword("");
     setPhone("");
     setCompanyName("");
     setPartnerType("affiliate");
@@ -183,6 +185,7 @@ export default function PartnerPage() {
       {
         contactName,
         email,
+        password,
         phone: phone || undefined,
         companyName: companyName || undefined,
         partnerType,
@@ -288,6 +291,18 @@ export default function PartnerPage() {
                           onChange={(e) => setEmail(e.target.value)}
                           required
                         />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="password">Password *</Label>
+                        <Input
+                          id="password"
+                          type="password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          required
+                          minLength={8}
+                        />
+                        <p className="text-xs text-muted-foreground">Required to log in and check your status later.</p>
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="phone">Phone</Label>

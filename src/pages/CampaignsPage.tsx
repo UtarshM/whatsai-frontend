@@ -47,6 +47,9 @@ export default function CampaignsPage() {
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [search, setSearch] = useState("");
   const [templateVariables, setTemplateVariables] = useState<Record<string, string>>({});
+  const [scheduleFor, setScheduleFor] = useState("");
+  const [campaignSearch, setCampaignSearch] = useState("");
+  const [campaignStatusFilter, setCampaignStatusFilter] = useState<"All" | keyof typeof statusStyles>("All");
 
   const filteredContacts = useMemo(
     () =>
@@ -71,6 +74,15 @@ export default function CampaignsPage() {
   const isLowBalance = walletBalance <= lowBalanceThreshold;
   const canSend = selectedContacts.length > 0 && Boolean(selectedTemplateId) && walletBalance >= estimatedCost && whatsApp.connected;
   const sendingCampaigns = campaigns.filter((campaign) => campaign.status === "Sending" || campaign.status === "Scheduled").length;
+  const filteredCampaigns = useMemo(
+    () => campaigns.filter((campaign) => {
+      const templateName = approvedTemplates.find((template) => template.id === campaign.templateId)?.name || "";
+      const matchesSearch = [campaign.name, templateName].some((value) => value.toLowerCase().includes(campaignSearch.toLowerCase()));
+      const matchesStatus = campaignStatusFilter === "All" || campaign.status === campaignStatusFilter;
+      return matchesSearch && matchesStatus;
+    }),
+    [approvedTemplates, campaignSearch, campaignStatusFilter, campaigns],
+  );
 
   const toggleContact = (contactId: string) => {
     setSelectedContacts((current) =>
@@ -97,6 +109,7 @@ export default function CampaignsPage() {
     setSelectedTemplateId("");
     setSearch("");
     setTemplateVariables({});
+    setScheduleFor("");
   };
 
   const goNext = () => {
@@ -118,7 +131,8 @@ export default function CampaignsPage() {
     setStep((current) => Math.min(current + 1, wizardSteps.length - 1));
   };
 
-  const handleSubmit = async (sendNow: boolean) => {
+  const handleSubmit = async (mode: "send" | "schedule" | "draft") => {
+    const sendNow = mode === "send";
     if (sendNow && !whatsApp.connected) {
       toast({
         title: "WhatsApp not connected",
@@ -149,14 +163,15 @@ export default function CampaignsPage() {
       templateId: selectedTemplateId,
       contactIds: selectedContacts,
       sendNow,
+      scheduledFor: mode === "schedule" ? scheduleFor || null : null,
     });
 
     if (!result.ok) {
-      toast({ title: sendNow ? "Campaign blocked" : "Draft not saved", description: result.message });
+      toast({ title: sendNow ? "Campaign blocked" : mode === "schedule" ? "Schedule failed" : "Draft not saved", description: result.message });
       return;
     }
 
-    toast({ title: sendNow ? "Campaign sent" : "Draft saved", description: result.message });
+    toast({ title: sendNow ? "Campaign sent" : mode === "schedule" ? "Campaign scheduled" : "Draft saved", description: result.message });
     resetWizard();
   };
 
@@ -272,13 +287,22 @@ export default function CampaignsPage() {
                         <h3 className="font-display text-lg font-semibold text-foreground">Choose audience</h3>
                         <p className="text-sm text-muted-foreground">Select the customer group that should receive this campaign</p>
                       </div>
-                      <input
-                        type="text"
-                        value={search}
-                        onChange={(event) => setSearch(event.target.value)}
-                        placeholder="Search name, phone, or tag"
-                        className="h-10 w-full rounded-xl border border-input bg-background px-4 text-sm md:max-w-xs"
-                      />
+                      <div className="flex w-full gap-2 md:max-w-lg">
+                        <input
+                          type="text"
+                          value={search}
+                          onChange={(event) => setSearch(event.target.value)}
+                          placeholder="Search name, phone, or tag"
+                          className="h-10 w-full rounded-xl border border-input bg-background px-4 text-sm"
+                        />
+                        <Button
+                          variant="outline"
+                          onClick={() => setSelectedContacts(filteredContacts.map((contact) => contact.id))}
+                          disabled={filteredContacts.length === 0}
+                        >
+                          Select all
+                        </Button>
+                      </div>
                     </div>
                     <div className="grid gap-3 md:grid-cols-2">
                       {filteredContacts.map((contact) => (
@@ -403,6 +427,19 @@ export default function CampaignsPage() {
                       </div>
                     </div>
 
+                    <div className="rounded-2xl border border-border bg-muted/30 p-4">
+                      <label className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Schedule for later</label>
+                      <input
+                        type="datetime-local"
+                        value={scheduleFor}
+                        onChange={(event) => setScheduleFor(event.target.value)}
+                        className="mt-3 h-11 w-full rounded-xl border border-input bg-background px-4 text-sm"
+                      />
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Leave this empty if you want to save a draft. Add a date and use schedule to place the campaign in the live pipeline.
+                      </p>
+                    </div>
+
                     {selectedTemplate && templatePlaceholders.length > 0 && (
                       <div className="rounded-2xl border border-border bg-muted/30 p-4">
                         <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Variable mapping</p>
@@ -485,10 +522,13 @@ export default function CampaignsPage() {
                     </Button>
                   ) : (
                     <>
-                      <Button variant="gradient" onClick={() => handleSubmit(true)} disabled={!canSend}>
+                      <Button variant="gradient" onClick={() => handleSubmit("send")} disabled={!canSend}>
                         <Send className="h-4 w-4 mr-1" /> Send Campaign
                       </Button>
-                      <Button variant="outline" onClick={() => handleSubmit(false)}>
+                      <Button variant="outline" onClick={() => handleSubmit("schedule")} disabled={!scheduleFor}>
+                        Schedule Campaign
+                      </Button>
+                      <Button variant="outline" onClick={() => handleSubmit("draft")}>
                         Save as Draft
                       </Button>
                     </>
@@ -502,8 +542,29 @@ export default function CampaignsPage() {
           </motion.div>
         )}
 
+        <div className="rounded-[1.5rem] border border-border bg-card p-5 shadow-card">
+          <div className="grid gap-3 md:grid-cols-[1fr,180px]">
+            <input
+              type="text"
+              value={campaignSearch}
+              onChange={(event) => setCampaignSearch(event.target.value)}
+              placeholder="Search campaign or template"
+              className="h-11 rounded-xl border border-input bg-background px-4 text-sm"
+            />
+            <select
+              value={campaignStatusFilter}
+              onChange={(event) => setCampaignStatusFilter(event.target.value as "All" | keyof typeof statusStyles)}
+              className="h-11 rounded-xl border border-input bg-background px-4 text-sm"
+            >
+              {["All", "Draft", "Scheduled", "Sending", "Delivered"].map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
         <div className="grid gap-4">
-          {campaigns.map((campaign, index) => (
+          {filteredCampaigns.map((campaign, index) => (
             <motion.div
               key={campaign.id}
               initial={{ opacity: 0, y: 12 }}
@@ -549,6 +610,12 @@ export default function CampaignsPage() {
               </div>
             </motion.div>
           ))}
+          {filteredCampaigns.length === 0 && (
+            <div className="rounded-[1.5rem] border border-dashed border-border bg-card px-6 py-12 text-center shadow-card">
+              <p className="text-base font-semibold text-foreground">No campaigns match these filters</p>
+              <p className="mt-2 text-sm text-muted-foreground">Clear the filters or launch a new campaign from the wizard.</p>
+            </div>
+          )}
         </div>
       </div>
     </DashboardLayout>

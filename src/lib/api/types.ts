@@ -5,9 +5,20 @@ export const LOW_BALANCE_THRESHOLD = 500;
 // Re-export for server-side usage
 export { COST_PER_MESSAGE as default };
 
+export type UserRole = "ADMIN" | "PARTNER" | "USER";
+
 export interface User {
+  id?: string;
   name: string;
   email: string;
+  role: UserRole;
+}
+
+export interface Branding {
+  brandName?: string;
+  logoUrl?: string;
+  primaryColor?: string;
+  supportEmail?: string;
 }
 
 export type WhatsAppConnectionStatus = "pending" | "connected" | "disconnected";
@@ -50,6 +61,61 @@ export interface AutomationEvent {
   createdAt: string;
 }
 
+export type AutomationFlowNodeType =
+  | "trigger"
+  | "lead_trigger"
+  | "send_message"
+  | "send_interactive"
+  | "wait"
+  | "condition"
+  | "tag";
+
+export interface AutomationFlowNodeData {
+  triggerType?: "new_lead" | "new_inbound" | "contacted_lead";
+  templateName?: string;
+  languageCode?: string;
+  body?: string;
+  buttons?: Array<{ id: string; title: string }>;
+  hours?: number;
+  type?: "has_tag";
+  tag?: string;
+}
+
+export interface AutomationFlowNode {
+  id: string;
+  type: AutomationFlowNodeType;
+  position: { x: number; y: number };
+  data: AutomationFlowNodeData;
+}
+
+export interface AutomationFlowEdge {
+  id?: string;
+  source: string;
+  target: string;
+  sourceHandle?: string;
+}
+
+export interface AutomationFlowDefinition {
+  id: string;
+  workspaceId?: string;
+  name: string;
+  description: string | null;
+  nodes: AutomationFlowNode[];
+  edges: AutomationFlowEdge[];
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SaveAutomationFlowInput {
+  id?: string;
+  name: string;
+  description?: string;
+  nodes: AutomationFlowNode[];
+  edges: AutomationFlowEdge[];
+  isActive: boolean;
+}
+
 export interface WhatsAppConnection {
   connected: boolean;
   connectionStatus: WhatsAppConnectionStatus;
@@ -82,6 +148,18 @@ export interface Template {
   status: "Approved" | "Pending" | "Rejected";
   language: string;
   preview: string;
+}
+
+export interface CreateTemplateInput {
+  name: string;
+  category: Template["category"];
+  language: string;
+  preview: string;
+}
+
+export interface UpdateTemplateInput extends CreateTemplateInput {
+  id: string;
+  status: Template["status"];
 }
 
 export interface Campaign {
@@ -252,6 +330,10 @@ export interface PartnerApplyInput {
   message?: string;
 }
 
+export interface PartnerPublicApplyInput extends PartnerApplyInput {
+  password: string;
+}
+
 export interface AppState {
   user: User | null;
   onboardingComplete: boolean;
@@ -279,6 +361,8 @@ export interface AppState {
   partnerStats: PartnerDashboardStats | null;
   partnerReferrals: PartnerReferral[];
   partnerPayouts: PartnerPayout[];
+  // Branding
+  branding: Branding | null;
 }
 
 export interface ActionResult {
@@ -322,6 +406,7 @@ export interface CreateCampaignInput {
   templateId: string;
   contactIds: string[];
   sendNow: boolean;
+  scheduledFor?: string | null;
 }
 
 export type AddContactInput = Omit<Contact, "id">;
@@ -370,5 +455,6 @@ export function emptyAppState(): AppState {
     partnerStats: null,
     partnerReferrals: [],
     partnerPayouts: [],
+    branding: null,
   };
 }

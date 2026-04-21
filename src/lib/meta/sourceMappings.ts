@@ -24,6 +24,7 @@ function getBaseUrl() {
 export async function fetchMetaSourceMappings() {
   const response = await fetch(`${getBaseUrl()}/meta/source-mappings`, {
     headers: await getAuthHeaders(),
+    credentials: "include",
   });
 
   const payload = await response.json() as { data?: MetaLeadSourceMapping[]; message?: string };
@@ -43,6 +44,7 @@ export async function createMetaSourceMapping(input: {
   const response = await fetch(`${getBaseUrl()}/meta/source-mappings`, {
     method: "POST",
     headers: await getAuthHeaders(),
+    credentials: "include",
     body: JSON.stringify(input),
   });
 
