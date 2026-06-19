@@ -15,6 +15,10 @@ import {
   UsersRound,
   UserCog,
   Palette,
+  ShieldAlert,
+  Handshake,
+  Filter,
+  MousePointerClick,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useNavigate } from "react-router-dom";
@@ -45,6 +49,8 @@ export function AppSidebar() {
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, roles: ["ADMIN", "PARTNER", "USER"] },
     { title: "Connect WhatsApp", url: "/connect", icon: Link2, roles: ["USER", "ADMIN"] },
     { title: "Campaigns", url: "/campaigns", icon: MessageSquare, roles: ["USER", "ADMIN"] },
+    { title: "Segments", url: "/segments", icon: Filter, roles: ["USER", "ADMIN"] },
+    { title: "Tracked Links", url: "/links", icon: MousePointerClick, roles: ["USER", "ADMIN"] },
     { title: "Inbox", url: "/inbox", icon: Inbox, roles: ["USER", "ADMIN"] },
     { title: "Leads", url: "/leads", icon: Megaphone, roles: ["USER", "ADMIN"] },
     { title: "Automations", url: "/automations", icon: Bot, roles: ["USER", "ADMIN"] },

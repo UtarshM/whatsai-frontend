@@ -17,6 +17,9 @@ import WalletPage from "./pages/WalletPage";
 import ContactsPage from "./pages/ContactsPage";
 import TemplatesPage from "./pages/TemplatesPage";
 import CampaignsPage from "./pages/CampaignsPage";
+import CampaignAnalyticsPage from "./pages/CampaignAnalyticsPage";
+import SegmentsPage from "./pages/SegmentsPage";
+import TrackedLinksPage from "./pages/TrackedLinksPage";
 import InboxPage from "./pages/InboxPage";
 import LeadsPage from "./pages/LeadsPage";
 import AutomationsPage from "./pages/AutomationsPage";
@@ -55,6 +58,9 @@ const App = () => (
               <Route path="/contacts" element={<ContactsPage />} />
               <Route path="/templates" element={<TemplatesPage />} />
               <Route path="/campaigns" element={<CampaignsPage />} />
+              <Route path="/campaigns/:id/analytics" element={<CampaignAnalyticsPage />} />
+              <Route path="/segments" element={<SegmentsPage />} />
+              <Route path="/links" element={<TrackedLinksPage />} />
               <Route path="/inbox" element={<InboxPage />} />
               <Route path="/leads" element={<LeadsPage />} />
               <Route path="/automations" element={<AutomationsPage />} />

@@ -3,11 +3,14 @@ import { Button } from "@/components/ui/button";
 import {
   AlertTriangle,
   ArrowUpRight,
+  BarChart3,
   CheckCircle2,
   ChevronRight,
   Clock,
+  Filter,
   MessageSquare,
   Plus,
+  Repeat,
   Send,
   Target,
   Users,
@@ -15,10 +18,16 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAppContext } from "@/context/AppContext";
 import { toast } from "@/components/ui/use-toast";
 import { activeApiAdapter } from "@/lib/api";
 import { sendMetaCampaignWithServer } from "@/lib/meta/server";
+import { useSegmentsQuery } from "@/hooks/useAdvancedApi";
+import { advancedApi, type CreateAdvancedCampaignInput, type RetargetInput } from "@/lib/api/advanced";
+
+type AudienceSource = "contacts" | "segment" | "retarget";
+const RETARGET_STATUSES = ["queued", "sent", "delivered", "failed"] as const;
 
 const statusStyles: Record<string, string> = {
   Delivered: "bg-success/10 text-success",
@@ -35,21 +44,36 @@ export default function CampaignsPage() {
     contacts,
     approvedTemplates,
     createCampaign,
+    refreshAppState,
     walletBalance,
     costPerMessage,
     lowBalanceThreshold,
     whatsApp,
   } = useAppContext();
+  const { data: segmentsData } = useSegmentsQuery();
+  const segments = segmentsData?.segments ?? [];
   const [showWizard, setShowWizard] = useState(false);
   const [step, setStep] = useState(0);
   const [campaignName, setCampaignName] = useState("");
+  const [audienceSource, setAudienceSource] = useState<AudienceSource>("contacts");
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
+  const [selectedSegmentId, setSelectedSegmentId] = useState("");
+  const [retargetCampaignId, setRetargetCampaignId] = useState("");
+  const [retargetStatuses, setRetargetStatuses] = useState<string[]>([]);
+  const [retargetClicked, setRetargetClicked] = useState<"" | "yes" | "no">("");
+  const [recurrenceFreq, setRecurrenceFreq] = useState<"" | "daily" | "weekly" | "monthly">("");
+  const [recurrenceInterval, setRecurrenceInterval] = useState(1);
+  const [recurrenceUntil, setRecurrenceUntil] = useState("");
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [search, setSearch] = useState("");
   const [templateVariables, setTemplateVariables] = useState<Record<string, string>>({});
   const [scheduleFor, setScheduleFor] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [campaignSearch, setCampaignSearch] = useState("");
   const [campaignStatusFilter, setCampaignStatusFilter] = useState<"All" | keyof typeof statusStyles>("All");
+
+  const selectedSegment = segments.find((s) => s.id === selectedSegmentId);
+  const retargetSource = campaigns.find((c) => c.id === retargetCampaignId);
 
   const filteredContacts = useMemo(
     () =>
@@ -70,9 +94,24 @@ export default function CampaignsPage() {
     return Array.from(new Set(selectedTemplate.preview.match(/\{\{\d+\}\}/g) ?? []));
   }, [selectedTemplate]);
 
-  const estimatedCost = Number((selectedContacts.length * costPerMessage).toFixed(2));
+  // Estimated recipient count for the chosen audience source. Segment/retarget
+  // counts are best-effort (resolved precisely on the backend at send time).
+  const audienceCount = useMemo(() => {
+    if (audienceSource === "segment") return selectedSegment?.contactCount ?? 0;
+    if (audienceSource === "retarget") return retargetSource?.contactIds.length ?? 0;
+    return selectedContacts.length;
+  }, [audienceSource, selectedSegment, retargetSource, selectedContacts]);
+
+  const audienceReady =
+    audienceSource === "contacts"
+      ? selectedContacts.length > 0
+      : audienceSource === "segment"
+        ? Boolean(selectedSegmentId)
+        : Boolean(retargetCampaignId);
+
+  const estimatedCost = Number((audienceCount * costPerMessage).toFixed(2));
   const isLowBalance = walletBalance <= lowBalanceThreshold;
-  const canSend = selectedContacts.length > 0 && Boolean(selectedTemplateId) && walletBalance >= estimatedCost && whatsApp.connected;
+  const canSend = audienceReady && Boolean(selectedTemplateId) && walletBalance >= estimatedCost && whatsApp.connected;
   const sendingCampaigns = campaigns.filter((campaign) => campaign.status === "Sending" || campaign.status === "Scheduled").length;
   const filteredCampaigns = useMemo(
     () => campaigns.filter((campaign) => {
@@ -105,7 +144,15 @@ export default function CampaignsPage() {
     setShowWizard(false);
     setStep(0);
     setCampaignName("");
+    setAudienceSource("contacts");
     setSelectedContacts([]);
+    setSelectedSegmentId("");
+    setRetargetCampaignId("");
+    setRetargetStatuses([]);
+    setRetargetClicked("");
+    setRecurrenceFreq("");
+    setRecurrenceInterval(1);
+    setRecurrenceUntil("");
     setSelectedTemplateId("");
     setSearch("");
     setTemplateVariables({});
@@ -113,8 +160,16 @@ export default function CampaignsPage() {
   };
 
   const goNext = () => {
-    if (step === 0 && selectedContacts.length === 0) {
-      toast({ title: "Select contacts", description: "Choose at least one recipient before continuing." });
+    if (step === 0 && !audienceReady) {
+      toast({
+        title: "Choose an audience",
+        description:
+          audienceSource === "segment"
+            ? "Select a saved segment before continuing."
+            : audienceSource === "retarget"
+              ? "Select a campaign to retarget before continuing."
+              : "Choose at least one recipient before continuing.",
+      });
       return;
     }
 
@@ -131,6 +186,28 @@ export default function CampaignsPage() {
     setStep((current) => Math.min(current + 1, wizardSteps.length - 1));
   };
 
+  // Map the wizard's "{{1}}" placeholder keys to the backend's token-keyed
+  // template parameter record (e.g. "{{1}}" -> "1").
+  const buildParameters = (): Record<string, string> => {
+    const params: Record<string, string> = {};
+    for (const [placeholder, value] of Object.entries(templateVariables)) {
+      const key = placeholder.replace(/[^0-9A-Za-z_]/g, "");
+      if (key && value.trim()) params[key] = value;
+    }
+    return params;
+  };
+
+  // In demo (mock) mode every audience resolves to concrete contact ids so the
+  // existing local createCampaign can render a new campaign.
+  const resolveLocalContactIds = (): string[] => {
+    if (audienceSource === "segment") return advancedApi.resolveSegmentContactIdsLocal(selectedSegmentId);
+    if (audienceSource === "retarget") return retargetSource?.contactIds ?? [];
+    return selectedContacts;
+  };
+
+  const successTitle = (mode: "send" | "schedule" | "draft") =>
+    mode === "send" ? "Campaign sent" : mode === "schedule" ? "Campaign scheduled" : "Draft saved";
+
   const handleSubmit = async (mode: "send" | "schedule" | "draft") => {
     const sendNow = mode === "send";
     if (sendNow && !whatsApp.connected) {
@@ -141,38 +218,103 @@ export default function CampaignsPage() {
       return;
     }
 
-    if (sendNow && activeApiAdapter === "supabase") {
-      try {
-        await sendMetaCampaignWithServer({
-          templateId: selectedTemplateId,
-          contactIds: selectedContacts,
-          bodyParameters: templatePlaceholders.map((placeholder) => templateVariables[placeholder] ?? ""),
-        });
-      } catch (error) {
-        toast({
-          title: "Meta send failed",
-          description: error instanceof Error ? error.message : "Campaign could not be sent through Meta.",
-          variant: "destructive",
-        });
-        return;
-      }
-    }
-
-    const result = await createCampaign({
-      name: campaignName || `Campaign ${new Date().toLocaleDateString("en-IN")}`,
-      templateId: selectedTemplateId,
-      contactIds: selectedContacts,
-      sendNow,
-      scheduledFor: mode === "schedule" ? scheduleFor || null : null,
-    });
-
-    if (!result.ok) {
-      toast({ title: sendNow ? "Campaign blocked" : mode === "schedule" ? "Schedule failed" : "Draft not saved", description: result.message });
+    const scheduledForIso =
+      mode === "schedule" && scheduleFor ? new Date(scheduleFor).toISOString() : undefined;
+    if (mode === "schedule" && recurrenceFreq && !scheduledForIso) {
+      toast({ title: "Pick a start time", description: "A recurring campaign needs a scheduled start time." });
       return;
     }
 
-    toast({ title: sendNow ? "Campaign sent" : mode === "schedule" ? "Campaign scheduled" : "Draft saved", description: result.message });
-    resetWizard();
+    const name = campaignName || `Campaign ${new Date().toLocaleDateString("en-IN")}`;
+    setSubmitting(true);
+    try {
+      // ----- Real backend: send the audience-aware payload as-is. -----
+      if (advancedApi.isHttp) {
+        const payload: CreateAdvancedCampaignInput = {
+          name,
+          templateId: selectedTemplateId,
+          parameters: buildParameters(),
+          sendNow,
+          scheduledFor: scheduledForIso,
+        };
+        if (audienceSource === "contacts") {
+          payload.recipients = selectedContacts.map((contactId) => ({ contactId }));
+        } else if (audienceSource === "segment") {
+          payload.segmentId = selectedSegmentId;
+        } else {
+          payload.retarget = {
+            fromCampaignId: retargetCampaignId,
+            statuses: retargetStatuses.length
+              ? (retargetStatuses as RetargetInput["statuses"])
+              : undefined,
+            clicked: retargetClicked === "" ? undefined : retargetClicked === "yes",
+          };
+        }
+        if (scheduledForIso && recurrenceFreq) {
+          payload.recurrence = {
+            freq: recurrenceFreq,
+            interval: recurrenceInterval,
+            until: recurrenceUntil ? new Date(recurrenceUntil).toISOString() : undefined,
+          };
+        }
+        const result = await advancedApi.createCampaign(payload);
+        await refreshAppState();
+        toast({ title: successTitle(mode), description: result.message });
+        resetWizard();
+        return;
+      }
+
+      // ----- Demo path (mock / supabase): resolve to concrete contacts. -----
+      if (sendNow && activeApiAdapter === "supabase" && audienceSource === "contacts") {
+        try {
+          await sendMetaCampaignWithServer({
+            templateId: selectedTemplateId,
+            contactIds: selectedContacts,
+            bodyParameters: templatePlaceholders.map((placeholder) => templateVariables[placeholder] ?? ""),
+          });
+        } catch (error) {
+          toast({
+            title: "Meta send failed",
+            description: error instanceof Error ? error.message : "Campaign could not be sent through Meta.",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
+      const contactIds = resolveLocalContactIds();
+      if (contactIds.length === 0) {
+        toast({ title: "Empty audience", description: "This audience resolved to zero contacts." });
+        return;
+      }
+
+      const result = await createCampaign({
+        name,
+        templateId: selectedTemplateId,
+        contactIds,
+        sendNow,
+        scheduledFor: mode === "schedule" ? scheduleFor || null : null,
+      });
+
+      if (!result.ok) {
+        toast({
+          title: sendNow ? "Campaign blocked" : mode === "schedule" ? "Schedule failed" : "Draft not saved",
+          description: result.message,
+        });
+        return;
+      }
+
+      toast({
+        title: successTitle(mode),
+        description:
+          recurrenceFreq && mode === "schedule"
+            ? `${result.message} Recurring schedule is applied on the live backend.`
+            : result.message,
+      });
+      resetWizard();
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const renderedTemplatePreview = useMemo(() => {
@@ -281,54 +423,182 @@ export default function CampaignsPage() {
                 </div>
 
                 {step === 0 && (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between gap-4 flex-col md:flex-row">
-                      <div>
-                        <h3 className="font-display text-lg font-semibold text-foreground">Choose audience</h3>
-                        <p className="text-sm text-muted-foreground">Select the customer group that should receive this campaign</p>
-                      </div>
-                      <div className="flex w-full gap-2 md:max-w-lg">
-                        <input
-                          type="text"
-                          value={search}
-                          onChange={(event) => setSearch(event.target.value)}
-                          placeholder="Search name, phone, or tag"
-                          className="h-10 w-full rounded-xl border border-input bg-background px-4 text-sm"
-                        />
-                        <Button
-                          variant="outline"
-                          onClick={() => setSelectedContacts(filteredContacts.map((contact) => contact.id))}
-                          disabled={filteredContacts.length === 0}
-                        >
-                          Select all
-                        </Button>
-                      </div>
+                  <div className="space-y-5">
+                    <div>
+                      <h3 className="font-display text-lg font-semibold text-foreground">Choose audience</h3>
+                      <p className="text-sm text-muted-foreground">Pick who receives this campaign: hand-picked contacts, a saved segment, or a retarget of a past campaign</p>
                     </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {filteredContacts.map((contact) => (
-                        <label key={contact.id} className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-4 transition-colors ${
-                          selectedContacts.includes(contact.id) ? "border-primary bg-primary/5" : "border-border"
-                        }`}>
-                          <input
-                            type="checkbox"
-                            checked={selectedContacts.includes(contact.id)}
-                            onChange={() => toggleContact(contact.id)}
-                            className="mt-1 h-4 w-4 rounded border-border"
-                          />
+
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      {([
+                        { key: "contacts", label: "Contacts", icon: Users, hint: "Hand-pick recipients" },
+                        { key: "segment", label: "Saved segment", icon: Filter, hint: "Rule-based audience" },
+                        { key: "retarget", label: "Retarget", icon: Repeat, hint: "Re-engage a campaign" },
+                      ] as const).map((opt) => (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          onClick={() => setAudienceSource(opt.key)}
+                          className={`flex items-start gap-3 rounded-2xl border p-4 text-left transition-colors ${
+                            audienceSource === opt.key ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
+                          }`}
+                        >
+                          <opt.icon className={`h-5 w-5 ${audienceSource === opt.key ? "text-primary" : "text-muted-foreground"}`} />
                           <div>
-                            <p className="text-sm font-medium text-foreground">{contact.name}</p>
-                            <p className="text-xs text-muted-foreground">{contact.phone}</p>
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              {contact.tags.map((tag) => (
-                                <span key={tag} className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
+                            <p className="text-sm font-semibold text-foreground">{opt.label}</p>
+                            <p className="text-xs text-muted-foreground">{opt.hint}</p>
                           </div>
-                        </label>
+                        </button>
                       ))}
                     </div>
+
+                    {audienceSource === "contacts" && (
+                      <div className="space-y-4">
+                        <div className="flex w-full gap-2">
+                          <input
+                            type="text"
+                            value={search}
+                            onChange={(event) => setSearch(event.target.value)}
+                            placeholder="Search name, phone, or tag"
+                            className="h-10 w-full rounded-xl border border-input bg-background px-4 text-sm"
+                          />
+                          <Button
+                            variant="outline"
+                            onClick={() => setSelectedContacts(filteredContacts.map((contact) => contact.id))}
+                            disabled={filteredContacts.length === 0}
+                          >
+                            Select all
+                          </Button>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          {filteredContacts.map((contact) => (
+                            <label key={contact.id} className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-4 transition-colors ${
+                              selectedContacts.includes(contact.id) ? "border-primary bg-primary/5" : "border-border"
+                            }`}>
+                              <input
+                                type="checkbox"
+                                checked={selectedContacts.includes(contact.id)}
+                                onChange={() => toggleContact(contact.id)}
+                                className="mt-1 h-4 w-4 rounded border-border"
+                              />
+                              <div>
+                                <p className="text-sm font-medium text-foreground">{contact.name}</p>
+                                <p className="text-xs text-muted-foreground">{contact.phone}</p>
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {contact.tags.map((tag) => (
+                                    <span key={tag} className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                                      {tag}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {audienceSource === "segment" && (
+                      <div className="space-y-3">
+                        {segments.length === 0 ? (
+                          <div className="rounded-2xl border border-dashed border-border bg-muted/20 p-6 text-center">
+                            <p className="text-sm font-medium text-foreground">No saved segments yet</p>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              Create a rule-based audience first, then target it here.
+                            </p>
+                            <Link to="/segments">
+                              <Button variant="outline" size="sm" className="mt-3">
+                                <Filter className="h-4 w-4 mr-1" /> Build a segment
+                              </Button>
+                            </Link>
+                          </div>
+                        ) : (
+                          <div className="grid gap-3">
+                            {segments.map((segment) => (
+                              <button
+                                key={segment.id}
+                                type="button"
+                                onClick={() => setSelectedSegmentId(segment.id)}
+                                className={`flex items-center justify-between gap-3 rounded-2xl border p-4 text-left transition-colors ${
+                                  selectedSegmentId === segment.id ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
+                                }`}
+                              >
+                                <div>
+                                  <p className="text-sm font-semibold text-foreground">{segment.name}</p>
+                                  <p className="text-xs text-muted-foreground">{segment.description || `match ${segment.filters?.match ?? "all"} · ${segment.filters?.conditions?.length ?? 0} rule(s)`}</p>
+                                </div>
+                                <span className="flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs font-medium text-foreground">
+                                  <Users className="h-3.5 w-3.5" />
+                                  {(segment.contactCount ?? 0).toLocaleString()}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {audienceSource === "retarget" && (
+                      <div className="space-y-4">
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-foreground">Source campaign</label>
+                          <select
+                            value={retargetCampaignId}
+                            onChange={(event) => setRetargetCampaignId(event.target.value)}
+                            className="h-11 w-full rounded-xl border border-input bg-background px-4 text-sm"
+                          >
+                            <option value="">Select a previous campaign…</option>
+                            {campaigns.map((campaign) => (
+                              <option key={campaign.id} value={campaign.id}>
+                                {campaign.name} · {campaign.status}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <p className="mb-2 text-sm font-medium text-foreground">Include recipients with status</p>
+                          <div className="flex flex-wrap gap-2">
+                            {RETARGET_STATUSES.map((status) => {
+                              const active = retargetStatuses.includes(status);
+                              return (
+                                <button
+                                  key={status}
+                                  type="button"
+                                  onClick={() =>
+                                    setRetargetStatuses((current) =>
+                                      current.includes(status)
+                                        ? current.filter((s) => s !== status)
+                                        : [...current, status],
+                                    )
+                                  }
+                                  className={`rounded-full border px-3 py-1.5 text-xs font-medium capitalize transition-colors ${
+                                    active ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground"
+                                  }`}
+                                >
+                                  {status}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">Leave all unselected to include every recipient.</p>
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-foreground">Link engagement</label>
+                          <select
+                            value={retargetClicked}
+                            onChange={(event) => setRetargetClicked(event.target.value as "" | "yes" | "no")}
+                            className="h-11 w-full rounded-xl border border-input bg-background px-4 text-sm md:max-w-xs"
+                          >
+                            <option value="">Any</option>
+                            <option value="yes">Clicked a tracked link</option>
+                            <option value="no">Did not click</option>
+                          </select>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          The exact audience is resolved on the backend at send time from the source campaign’s delivery and click data.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -411,7 +681,14 @@ export default function CampaignsPage() {
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="rounded-2xl border border-border bg-muted/30 p-4">
                         <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Audience</p>
-                        <p className="mt-2 text-lg font-semibold text-foreground">{selectedContacts.length} contacts</p>
+                        <p className="mt-2 text-lg font-semibold text-foreground">~{audienceCount.toLocaleString()} contacts</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {audienceSource === "segment"
+                            ? `Segment: ${selectedSegment?.name ?? "—"}`
+                            : audienceSource === "retarget"
+                              ? `Retarget: ${retargetSource?.name ?? "—"}`
+                              : "Hand-picked contacts"}
+                        </p>
                       </div>
                       <div className="rounded-2xl border border-border bg-muted/30 p-4">
                         <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Estimated cost</p>
@@ -438,6 +715,52 @@ export default function CampaignsPage() {
                       <p className="mt-2 text-xs text-muted-foreground">
                         Leave this empty if you want to save a draft. Add a date and use schedule to place the campaign in the live pipeline.
                       </p>
+
+                      <div className="mt-4 border-t border-border pt-4">
+                        <div className="flex items-center gap-2">
+                          <Repeat className="h-4 w-4 text-muted-foreground" />
+                          <label className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Repeat (optional)</label>
+                        </div>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                          <select
+                            value={recurrenceFreq}
+                            onChange={(event) => setRecurrenceFreq(event.target.value as typeof recurrenceFreq)}
+                            className="h-11 w-full rounded-xl border border-input bg-background px-4 text-sm"
+                          >
+                            <option value="">Does not repeat</option>
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                          </select>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-muted-foreground">every</span>
+                            <input
+                              type="number"
+                              min={1}
+                              value={recurrenceInterval}
+                              disabled={!recurrenceFreq}
+                              onChange={(event) => setRecurrenceInterval(Math.max(1, Number(event.target.value) || 1))}
+                              className="h-11 w-20 rounded-xl border border-input bg-background px-3 text-sm disabled:opacity-50"
+                            />
+                            <span className="text-sm text-muted-foreground">
+                              {recurrenceFreq === "weekly" ? "week(s)" : recurrenceFreq === "monthly" ? "month(s)" : "day(s)"}
+                            </span>
+                          </div>
+                          <input
+                            type="date"
+                            value={recurrenceUntil}
+                            disabled={!recurrenceFreq}
+                            onChange={(event) => setRecurrenceUntil(event.target.value)}
+                            className="h-11 w-full rounded-xl border border-input bg-background px-4 text-sm disabled:opacity-50"
+                            title="Repeat until (optional)"
+                          />
+                        </div>
+                        {recurrenceFreq && (
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            Each run clones the next occurrence after dispatch (requires a scheduled start time).
+                          </p>
+                        )}
+                      </div>
                     </div>
 
                     {selectedTemplate && templatePlaceholders.length > 0 && (
@@ -492,7 +815,7 @@ export default function CampaignsPage() {
                 <div className="mt-4 space-y-3 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Recipients</span>
-                    <span className="font-medium text-foreground">{selectedContacts.length}</span>
+                    <span className="font-medium text-foreground">~{audienceCount.toLocaleString()}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Cost per message</span>
@@ -522,13 +845,13 @@ export default function CampaignsPage() {
                     </Button>
                   ) : (
                     <>
-                      <Button variant="gradient" onClick={() => handleSubmit("send")} disabled={!canSend}>
+                      <Button variant="gradient" onClick={() => handleSubmit("send")} disabled={!canSend || submitting}>
                         <Send className="h-4 w-4 mr-1" /> Send Campaign
                       </Button>
-                      <Button variant="outline" onClick={() => handleSubmit("schedule")} disabled={!scheduleFor}>
+                      <Button variant="outline" onClick={() => handleSubmit("schedule")} disabled={!scheduleFor || submitting}>
                         Schedule Campaign
                       </Button>
-                      <Button variant="outline" onClick={() => handleSubmit("draft")}>
+                      <Button variant="outline" onClick={() => handleSubmit("draft")} disabled={submitting}>
                         Save as Draft
                       </Button>
                     </>
@@ -603,9 +926,11 @@ export default function CampaignsPage() {
                   <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${statusStyles[campaign.status]}`}>
                     {campaign.status}
                   </span>
-                  <Button variant="ghost" size="sm" className="text-primary">
-                    Open <ArrowUpRight className="h-4 w-4 ml-1" />
-                  </Button>
+                  <Link to={`/campaigns/${campaign.id}/analytics`}>
+                    <Button variant="ghost" size="sm" className="text-primary">
+                      <BarChart3 className="h-4 w-4 mr-1" /> Analytics <ArrowUpRight className="h-4 w-4 ml-1" />
+                    </Button>
+                  </Link>
                 </div>
               </div>
             </motion.div>
