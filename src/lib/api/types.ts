@@ -5,7 +5,7 @@ export const LOW_BALANCE_THRESHOLD = 500;
 // Re-export for server-side usage
 export { COST_PER_MESSAGE as default };
 
-export type UserRole = "ADMIN" | "PARTNER" | "USER";
+export type UserRole = "OWNER" | "ADMIN" | "MANAGER" | "AGENT" | "VIEWER" | "PARTNER";
 
 export interface User {
   id?: string;
@@ -68,7 +68,12 @@ export type AutomationFlowNodeType =
   | "send_interactive"
   | "wait"
   | "condition"
-  | "tag";
+  | "tag"
+  | "assign_agent"
+  | "handoff_to_human"
+  | "send_text"
+  | "api_request"
+  | "update_lead";
 
 export interface AutomationFlowNodeData {
   triggerType?: "new_lead" | "new_inbound" | "contacted_lead";
@@ -79,6 +84,16 @@ export interface AutomationFlowNodeData {
   hours?: number;
   type?: "has_tag";
   tag?: string;
+  targetTeamId?: string;
+  handoffMessage?: string;
+  pauseBot?: boolean;
+  url?: string;
+  method?: string;
+  headers?: Record<string, string>;
+  responseMapping?: Record<string, string>;
+  status?: string;
+  assignedTo?: string;
+  notes?: string;
 }
 
 export interface AutomationFlowNode {

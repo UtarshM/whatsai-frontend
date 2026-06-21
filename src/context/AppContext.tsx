@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { activeApiAdapter, api } from "@/lib/api";
 import {
   COST_PER_MESSAGE,
@@ -68,6 +68,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     activeApiAdapter === "mock" ? readAppState() ?? defaultAppState : defaultAppState
   ));
   const [isHydrating, setIsHydrating] = useState(true);
+  const eventSourceRef = useRef<EventSource | null>(null);
+
+  const refreshState = useCallback(async () => {
+    try {
+      const nextState = await api.getAppState();
+      setState(nextState);
+    } catch (error) {
+      console.error("Failed to refresh app state", error);
+    }
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -104,6 +114,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (activeApiAdapter === "mock") return;
+
+    const baseUrl = import.meta.env.VITE_API_URL || "http://localhost:3001";
+    const es = new EventSource(`${baseUrl}/realtime/stream`, { withCredentials: true });
+    eventSourceRef.current = es;
+
+    es.addEventListener("new_message", () => {
+      void refreshState();
+    });
+
+    es.addEventListener("conversation_updated", () => {
+      void refreshState();
+    });
+
+    es.addEventListener("handoff", () => {
+      void refreshState();
+    });
+
+    es.addEventListener("off_hours_reply", () => {
+      void refreshState();
+    });
+
+    es.addEventListener("flow_completed", () => {
+      void refreshState();
+    });
+
+    es.addEventListener("flow_failed", () => {
+      void refreshState();
+    });
+
+    es.addEventListener("lead_updated", () => {
+      void refreshState();
+    });
+
+    es.onerror = () => {
+      es.close();
+      setTimeout(() => {
+        if (eventSourceRef.current === es) {
+          const newEs = new EventSource(`${baseUrl}/realtime/stream`, { withCredentials: true });
+          eventSourceRef.current = newEs;
+        }
+      }, 5000);
+    };
+
+    return () => {
+      es.close();
+      eventSourceRef.current = null;
+    };
+  }, [activeApiAdapter, refreshState]);
 
   const value = useMemo<AppContextValue>(() => ({
     ...state,

@@ -152,30 +152,63 @@ export function createHttpApi({ baseUrl }: HttpApiOptions): AppApi {
         method: "PATCH",
         body: JSON.stringify(input),
       }),
-    updateConversation: (input: UpdateConversationInput) =>
-      getState("/conversations/update", {
+    updateConversation: async (input: UpdateConversationInput) => {
+      const { id, ...body } = input;
+      await request<{ data: unknown }>(`/conversations/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+      return await getState(apiRoutes.appState);
+    },
+    addConversationNote: async (input: AddConversationNoteInput) => {
+      const { conversationId, ...body } = input;
+      await request<{ data: unknown }>(`/conversations/${conversationId}/notes`, {
         method: "POST",
-        body: JSON.stringify(input),
-      }),
-    addConversationNote: (input: AddConversationNoteInput) =>
-      getState("/conversations/note", {
+        body: JSON.stringify(body),
+      });
+      return await getState(apiRoutes.appState);
+    },
+    updateLead: async (input: UpdateLeadInput) => {
+      const { id, ...body } = input;
+      if (body.status) {
+        await request<{ data: unknown }>(`/leads/${id}/status`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: body.status }),
+        });
+      }
+      if (body.assignedTo !== undefined) {
+        await request<{ data: unknown }>(`/leads/${id}/assign`, {
+          method: "POST",
+          body: JSON.stringify({ userId: body.assignedTo }),
+        });
+      }
+      if (body.notes) {
+        await request<{ data: unknown }>(`/leads/${id}/notes`, {
+          method: "POST",
+          body: JSON.stringify({ body: body.notes }),
+        });
+      }
+      return await getState(apiRoutes.appState);
+    },
+    updateAutomation: async (input: UpdateAutomationInput) => {
+      await request<{ result: unknown }>("/automation/definitions", {
         method: "POST",
-        body: JSON.stringify(input),
-      }),
-    updateLead: (input: UpdateLeadInput) =>
-      getState("/leads/update", {
+        body: JSON.stringify({
+          ruleType: input.type,
+          name: input.type,
+          enabled: input.enabled,
+          config: input.config,
+        }),
+      });
+      return await getState(apiRoutes.appState);
+    },
+    runAutomationSweep: async () => {
+      const response = await request<{ result: unknown }>("/automation/process-reminders", {
         method: "POST",
-        body: JSON.stringify(input),
-      }),
-    updateAutomation: (input: UpdateAutomationInput) =>
-      getState("/automation/update", {
-        method: "POST",
-        body: JSON.stringify(input),
-      }),
-    runAutomationSweep: () =>
-      getAction("/automation/sweep", {
-        method: "POST",
-      }),
+      });
+      const state = await getState(apiRoutes.appState);
+      return { state, result: { ok: true, message: String(response.result ?? "Sweep completed") } };
+    },
     retryFailedSend: (input: RetryFailedSendInput) =>
       getAction("/ops/retry-failed-send", {
         method: "POST",

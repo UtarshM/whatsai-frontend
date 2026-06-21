@@ -33,6 +33,20 @@ import PartnerDashboard from "./pages/PartnerDashboard";
 import PartnerManagement from "./pages/PartnerManagement";
 import PartnerBranding from "./pages/PartnerBranding";
 import AdminUserManagement from "./pages/AdminUserManagement";
+import TeamsPage from "./pages/TeamsPage";
+import AgentsPage from "./pages/AgentsPage";
+import CannedRepliesPage from "./pages/CannedRepliesPage";
+import AssignmentRulesPage from "./pages/AssignmentRulesPage";
+import BusinessHoursPage from "./pages/BusinessHoursPage";
+import AgentAnalyticsPage from "./pages/AgentAnalyticsPage";
+import FlowRunsPage from "./pages/FlowRunsPage";
+import AiAgentPage from "./pages/AiAgentPage";
+import KnowledgeBasePage from "./pages/KnowledgeBasePage";
+import PaymentsPage from "./pages/PaymentsPage";
+import CataloguePage from "./pages/CataloguePage";
+import GrowthPage from "./pages/GrowthPage";
+import FormsPage from "./pages/FormsPage";
+import OpsLogsPage from "./pages/OpsLogsPage";
 
 const queryClient = new QueryClient();
 
@@ -71,6 +85,20 @@ const App = () => (
               <Route path="/partners/manage" element={<PartnerManagement />} />
               <Route path="/partners/branding" element={<PartnerBranding />} />
               <Route path="/admin/users" element={<AdminUserManagement />} />
+              <Route path="/admin/teams" element={<TeamsPage />} />
+              <Route path="/admin/agents" element={<AgentsPage />} />
+              <Route path="/admin/canned-replies" element={<CannedRepliesPage />} />
+              <Route path="/admin/assignment-rules" element={<AssignmentRulesPage />} />
+              <Route path="/admin/business-hours" element={<BusinessHoursPage />} />
+              <Route path="/admin/agent-analytics" element={<AgentAnalyticsPage />} />
+              <Route path="/admin/flow-runs" element={<FlowRunsPage />} />
+              <Route path="/admin/ai-agent" element={<AiAgentPage />} />
+              <Route path="/admin/knowledge-base" element={<KnowledgeBasePage />} />
+              <Route path="/admin/ops-logs" element={<OpsLogsPage />} />
+              <Route path="/payments" element={<PaymentsPage />} />
+              <Route path="/catalogue" element={<CataloguePage />} />
+              <Route path="/growth" element={<GrowthPage />} />
+              <Route path="/forms" element={<FormsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
             <Route path="*" element={<NotFound />} />

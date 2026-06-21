@@ -21,7 +21,7 @@ import { Label } from "@/components/ui/label";
 import { AppSidebar } from "@/components/AppSidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Bot, Clock3, GitBranch, MessageSquareMore, Plus, Save, Tag, Trash2, Waypoints } from "lucide-react";
+import { ArrowLeft, Bot, Clock3, GitBranch, MessageSquareMore, Plus, Save, Tag, Trash2, Waypoints, UserCheck, HandMetal, Send, Globe, pencil } from "lucide-react";
 import { toast } from "sonner";
 import { fetchAutomationFlowDefinitions, saveAutomationFlowDefinition } from "@/lib/automation/server";
 import { useAppContext } from "@/context/AppContext";
@@ -143,6 +143,51 @@ const ConditionNode = ({ data }: { data: AutomationFlowNodeData }) => (
   </div>
 );
 
+const AssignAgentNode = ({ data }: { data: AutomationFlowNodeData }) => (
+  <NodeFrame
+    color="border-cyan-500"
+    icon={<UserCheck size={16} className="text-cyan-600" />}
+    title="Assign Agent"
+    subtitle={data.targetTeamId ? `Team: ${data.targetTeamId}` : "Auto-assign via rules"}
+  />
+);
+
+const HandoffNode = ({ data }: { data: AutomationFlowNodeData }) => (
+  <NodeFrame
+    color="border-red-500"
+    icon={<HandMetal size={16} className="text-red-600" />}
+    title="Handoff to Human"
+    subtitle={data.handoffMessage || "Transfer to agent"}
+  />
+);
+
+const SendTextNode = ({ data }: { data: AutomationFlowNodeData }) => (
+  <NodeFrame
+    color="border-teal-500"
+    icon={<Send size={16} className="text-teal-600" />}
+    title="Send Text"
+    subtitle={data.body ? (data.body.length > 30 ? data.body.slice(0, 27) + "..." : data.body) : "Plain text message"}
+  />
+);
+
+const ApiRequestNode = ({ data }: { data: AutomationFlowNodeData }) => (
+  <NodeFrame
+    color="border-indigo-500"
+    icon={<Globe size={16} className="text-indigo-600" />}
+    title="API Request"
+    subtitle={data.url ? `${data.method || "GET"} ${new URL(data.url).hostname}` : "Call external API"}
+  />
+);
+
+const UpdateLeadNode = ({ data }: { data: AutomationFlowNodeData }) => (
+  <NodeFrame
+    color="border-amber-500"
+    icon={<pencil size={16} className="text-amber-600" />}
+    title="Update Lead"
+    subtitle={data.status ? `Set status: ${data.status}` : "Modify lead fields"}
+  />
+);
+
 const nodeTypes = {
   trigger: TriggerNode,
   lead_trigger: TriggerNode,
@@ -151,6 +196,11 @@ const nodeTypes = {
   wait: WaitNode,
   condition: ConditionNode,
   tag: TagNode,
+  assign_agent: AssignAgentNode,
+  handoff_to_human: HandoffNode,
+  send_text: SendTextNode,
+  api_request: ApiRequestNode,
+  update_lead: UpdateLeadNode,
 };
 
 const initialNodes: FlowNode[] = [
@@ -178,6 +228,11 @@ function defaultNodeData(type: AutomationFlowNodeType): AutomationFlowNodeData {
   }
   if (type === "condition") return { type: "has_tag", tag: "Interested" };
   if (type === "tag") return { tag: "Qualified" };
+  if (type === "assign_agent") return { targetTeamId: "" };
+  if (type === "handoff_to_human") return { handoffMessage: "Transferring you to a human agent...", pauseBot: true };
+  if (type === "send_text") return { body: "" };
+  if (type === "api_request") return { url: "", method: "GET", headers: {}, responseMapping: {} };
+  if (type === "update_lead") return { status: "", assignedTo: "", notes: "" };
   return { triggerType: "new_lead" };
 }
 
@@ -194,6 +249,8 @@ function WorkflowBuilderInner() {
   const [isActive, setIsActive] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [testLeadId, setTestLeadId] = useState("");
 
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedNodeId) ?? null,
@@ -289,6 +346,33 @@ function WorkflowBuilderInner() {
     }
   };
 
+  const handleTestFlow = async () => {
+    if (!testLeadId.trim()) {
+      toast.error("Enter a lead ID to test with.");
+      return;
+    }
+    try {
+      setIsTesting(true);
+      const baseUrl = import.meta.env.VITE_API_URL || "http://localhost:3001";
+      const response = await fetch(`${baseUrl}/automation/test`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ flowDefinitionId: flowId, leadId: testLeadId.trim() }),
+      });
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.message || "Failed to create test run");
+      }
+      const result = await response.json();
+      toast.success(`Test flow run created: ${result.data.flowRunId}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to test flow");
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
   return (
     <SidebarProvider defaultOpen={false}>
       <div className="flex h-screen w-full bg-muted/30 overflow-hidden">
@@ -320,6 +404,19 @@ function WorkflowBuilderInner() {
                 <input type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} />
               </label>
               <Button variant="outline" onClick={() => navigate("/automations")}>Cancel</Button>
+              {flowId && (
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={testLeadId}
+                    onChange={(e) => setTestLeadId(e.target.value)}
+                    placeholder="Lead ID to test"
+                    className="w-40 h-9 text-xs"
+                  />
+                  <Button variant="outline" onClick={() => void handleTestFlow()} disabled={isTesting}>
+                    {isTesting ? "Testing..." : "Test Flow"}
+                  </Button>
+                </div>
+              )}
               <Button onClick={() => void handleSave()} className="gap-2" disabled={isSaving || isLoading}>
                 <Save size={18} />
                 {isSaving ? "Saving..." : "Save Flow"}
@@ -350,6 +447,11 @@ function WorkflowBuilderInner() {
                     <Button variant="outline" size="sm" onClick={() => addNode("wait")}>Delay</Button>
                     <Button variant="outline" size="sm" onClick={() => addNode("condition")}>Condition</Button>
                     <Button variant="outline" size="sm" onClick={() => addNode("tag")}>Tag Contact</Button>
+                    <Button variant="outline" size="sm" onClick={() => addNode("assign_agent")}>Assign Agent</Button>
+                    <Button variant="outline" size="sm" onClick={() => addNode("handoff_to_human")}>Handoff to Human</Button>
+                    <Button variant="outline" size="sm" onClick={() => addNode("send_text")}>Send Text</Button>
+                    <Button variant="outline" size="sm" onClick={() => addNode("api_request")}>API Request</Button>
+                    <Button variant="outline" size="sm" onClick={() => addNode("update_lead")}>Update Lead</Button>
                   </Card>
                 </Panel>
               </ReactFlow>
@@ -488,6 +590,143 @@ function WorkflowBuilderInner() {
                           onChange={(event) => updateSelectedNode({ tag: event.target.value })}
                         />
                       </div>
+                    )}
+
+                    {selectedNode.type === "assign_agent" && (
+                      <div>
+                        <Label>Target Team ID (leave empty for auto-assign)</Label>
+                        <Input
+                          value={selectedNode.data.targetTeamId ?? ""}
+                          className="mt-2"
+                          placeholder="Optional team ID"
+                          onChange={(event) => updateSelectedNode({ targetTeamId: event.target.value })}
+                        />
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          If empty, the assignment rules engine will auto-assign based on configured rules.
+                        </p>
+                      </div>
+                    )}
+
+                    {selectedNode.type === "handoff_to_human" && (
+                      <>
+                        <div>
+                          <Label>Handoff Message</Label>
+                          <textarea
+                            rows={3}
+                            value={selectedNode.data.handoffMessage ?? ""}
+                            onChange={(event) => updateSelectedNode({ handoffMessage: event.target.value })}
+                            placeholder="Transferring you to a human agent..."
+                            className="mt-2 w-full rounded-xl border border-input bg-background px-4 py-3 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <Label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedNode.data.pauseBot ?? true}
+                              onChange={(event) => updateSelectedNode({ pauseBot: event.target.checked })}
+                              className="h-4 w-4"
+                            />
+                            Pause bot for this conversation
+                          </Label>
+                        </div>
+                      </>
+                    )}
+
+                    {selectedNode.type === "send_text" && (
+                      <div>
+                        <Label>Message Body</Label>
+                        <textarea
+                          rows={4}
+                          value={selectedNode.data.body ?? ""}
+                          onChange={(event) => updateSelectedNode({ body: event.target.value })}
+                          placeholder="Hi {{contact.name}}, here's your update..."
+                          className="mt-2 w-full rounded-xl border border-input bg-background px-4 py-3 text-sm"
+                        />
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Use {"{{contact.name}}"} for dynamic personalization.
+                        </p>
+                      </div>
+                    )}
+
+                    {selectedNode.type === "api_request" && (
+                      <>
+                        <div>
+                          <Label>URL</Label>
+                          <Input
+                            value={selectedNode.data.url ?? ""}
+                            className="mt-2"
+                            placeholder="https://api.example.com/endpoint"
+                            onChange={(event) => updateSelectedNode({ url: event.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <Label>Method</Label>
+                          <select
+                            value={selectedNode.data.method ?? "GET"}
+                            onChange={(event) => updateSelectedNode({ method: event.target.value })}
+                            className="mt-2 h-11 w-full rounded-xl border border-input bg-background px-4 text-sm"
+                          >
+                            <option value="GET">GET</option>
+                            <option value="POST">POST</option>
+                            <option value="PUT">PUT</option>
+                            <option value="PATCH">PATCH</option>
+                          </select>
+                        </div>
+                        <div>
+                          <Label>Response Mapping (JSON path → variable)</Label>
+                          <textarea
+                            rows={3}
+                            value={selectedNode.data.responseMapping ? JSON.stringify(selectedNode.data.responseMapping, null, 2) : "{}"}
+                            onChange={(event) => {
+                              try {
+                                updateSelectedNode({ responseMapping: JSON.parse(event.target.value) });
+                              } catch {}
+                            }}
+                            placeholder='{"orderStatus": "data.status"}'
+                            className="mt-2 w-full rounded-xl border border-input bg-background px-4 py-3 text-sm font-mono"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {selectedNode.type === "update_lead" && (
+                      <>
+                        <div>
+                          <Label>Status</Label>
+                          <select
+                            value={selectedNode.data.status ?? ""}
+                            onChange={(event) => updateSelectedNode({ status: event.target.value })}
+                            className="mt-2 h-11 w-full rounded-xl border border-input bg-background px-4 text-sm"
+                          >
+                            <option value="">No change</option>
+                            <option value="new">New</option>
+                            <option value="contacted">Contacted</option>
+                            <option value="qualified">Qualified</option>
+                            <option value="won">Won</option>
+                            <option value="lost">Lost</option>
+                          </select>
+                        </div>
+                        <div>
+                          <Label>Assigned To (user ID)</Label>
+                          <Input
+                            value={selectedNode.data.assignedTo ?? ""}
+                            className="mt-2"
+                            placeholder="Optional user ID"
+                            onChange={(event) => updateSelectedNode({ assignedTo: event.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <Label>Notes</Label>
+                          <textarea
+                            rows={3}
+                            value={selectedNode.data.notes ?? ""}
+                            onChange={(event) => updateSelectedNode({ notes: event.target.value })}
+                            placeholder="Lead qualification notes..."
+                            className="mt-2 w-full rounded-xl border border-input bg-background px-4 py-3 text-sm"
+                          />
+                        </div>
+                      </>
                     )}
 
                     <div className="rounded-xl border border-border bg-muted/20 p-4">

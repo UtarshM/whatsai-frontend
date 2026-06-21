@@ -19,6 +19,14 @@ import {
   Handshake,
   Filter,
   MousePointerClick,
+  Headphones,
+  GitBranch,
+  Clock,
+  BookOpen,
+  CreditCard,
+  Package,
+  FileText,
+  Activity,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useNavigate } from "react-router-dom";
@@ -59,6 +67,10 @@ export function AppSidebar() {
     { title: "Templates", url: "/templates", icon: FileText, roles: ["USER", "ADMIN"] },
     { title: "Contacts", url: "/contacts", icon: Users, roles: ["USER", "ADMIN"] },
     { title: "Wallet", url: "/wallet", icon: Wallet, roles: ["USER", "ADMIN"] },
+    { title: "Payments", url: "/payments", icon: CreditCard, roles: ["USER", "ADMIN"] },
+    { title: "Catalogue", url: "/catalogue", icon: Package, roles: ["USER", "ADMIN"] },
+    { title: "WhatsApp Links", url: "/growth", icon: Link2, roles: ["USER", "ADMIN"] },
+    { title: "Forms", url: "/forms", icon: FileText, roles: ["USER", "ADMIN"] },
     { title: "Transactions", url: "/transactions", icon: Receipt, roles: ["USER", "ADMIN", "PARTNER"] },
   ];
 
@@ -69,6 +81,16 @@ export function AppSidebar() {
 
   const adminItems = [
     { title: "Manage Users", url: "/admin/users", icon: UserCog, roles: ["ADMIN"] },
+    { title: "Teams", url: "/admin/teams", icon: UsersRound, roles: ["ADMIN"] },
+    { title: "Agents", url: "/admin/agents", icon: Headphones, roles: ["ADMIN"] },
+    { title: "Canned Replies", url: "/admin/canned-replies", icon: MessageSquare, roles: ["ADMIN"] },
+    { title: "Assignment Rules", url: "/admin/assignment-rules", icon: GitBranch, roles: ["ADMIN"] },
+    { title: "Business Hours", url: "/admin/business-hours", icon: Clock, roles: ["ADMIN"] },
+    { title: "Agent Analytics", url: "/admin/agent-analytics", icon: BarChart3, roles: ["ADMIN"] },
+    { title: "Flow Runs", url: "/admin/flow-runs", icon: Bot, roles: ["ADMIN"] },
+    { title: "Ops Logs", url: "/admin/ops-logs", icon: Activity, roles: ["ADMIN"] },
+    { title: "AI Agent", url: "/admin/ai-agent", icon: Bot, roles: ["ADMIN"] },
+    { title: "Knowledge Base", url: "/admin/knowledge-base", icon: BookOpen, roles: ["ADMIN"] },
     { title: "Manage Partners", url: "/partners/manage", icon: UsersRound, roles: ["ADMIN"] },
   ];
 
